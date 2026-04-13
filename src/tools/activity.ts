@@ -4,13 +4,7 @@ import { type ToolRegistrar, jsonResult } from "./context.js";
 export const registerActivityTools: ToolRegistrar = (server, ctx) => {
   server.tool(
     "get_activity_log",
-    "Read the audit/activity log for a server. " +
-      "These are panel-level events: who started/stopped/restarted, who edited files, who created backups, schedule executions, etc. " +
-      "This is NOT the console output of the server itself — for that, use `tail_console`. " +
-      "Filter by event prefix (e.g. `server:power`, `server:console.command`, `server:backup`). " +
-      "The acting user is included under `attributes.relationships.actor.attributes` " +
-      "(username/email/uuid); if `actor` is null the event was triggered by the system " +
-      "(schedule, automation) rather than a human.",
+    "Read panel audit log (power, commands, backups, file edits). Filter by event prefix. Includes acting user when available.",
     {
       server_id: z.string().describe("Server identifier"),
       page: z.number().int().min(1).optional(),

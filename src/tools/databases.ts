@@ -4,8 +4,7 @@ import { type ToolRegistrar, jsonResult } from "./context.js";
 export const registerDatabaseTools: ToolRegistrar = (server, ctx) => {
   server.tool(
     "list_databases",
-    "List databases attached to a server. Includes database name, username, host, port, " +
-      "and the password (the API exposes it via the `include=password` flag).",
+    "List databases with name, host, port, and password.",
     {
       server_id: z.string().describe("Server identifier"),
     },
@@ -17,9 +16,7 @@ export const registerDatabaseTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "create_database",
-    "Create a new database on a server. The server must have available database slots " +
-      "(see `feature_limits.databases` from get_server). The created database name is prefixed " +
-      "by the panel automatically.",
+    "Create a new database. Requires available slots (see get_server feature_limits).",
     {
       server_id: z.string().describe("Server identifier"),
       database: z

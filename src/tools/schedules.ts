@@ -8,8 +8,7 @@ const cronField = z
 export const registerScheduleTools: ToolRegistrar = (server, ctx) => {
   server.tool(
     "list_schedules",
-    "List all schedules defined on a server, with their tasks. " +
-      "Each schedule has a cron expression and a list of sequential tasks (command/power/backup).",
+    "List all schedules with their tasks.",
     {
       server_id: z.string().describe("Server identifier"),
     },
@@ -34,9 +33,7 @@ export const registerScheduleTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "create_schedule",
-    "Create a new schedule for a server. The cron fields use Pterodactyl's syntax " +
-      "(standard 5-field cron: minute, hour, day_of_month, month, day_of_week). " +
-      "After creation, add tasks via `create_schedule_task`.",
+    "Create a cron schedule. Add tasks via create_schedule_task after creation.",
     {
       server_id: z.string().describe("Server identifier"),
       name: z.string().min(1).max(191),
@@ -132,8 +129,7 @@ export const registerScheduleTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "execute_schedule",
-    "Execute a schedule immediately, ignoring its cron expression and active flag. " +
-      "Useful for testing or triggering an ad-hoc backup/restart.",
+    "Execute a schedule immediately, ignoring cron and active flag.",
     {
       server_id: z.string().describe("Server identifier"),
       schedule_id: z.number().int().positive(),
@@ -151,10 +147,7 @@ export const registerScheduleTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "create_schedule_task",
-    "Add a task to a schedule. Tasks run sequentially in `sequence_id` order, with `time_offset` " +
-      "seconds delay before the task fires (relative to schedule trigger or previous task). " +
-      "Action types: `command` (sends `payload` to console), `power` (`payload` = start/stop/restart/kill), " +
-      "`backup` (`payload` = optional ignored files).",
+    "Add a task to a schedule. Types: command (console), power (start/stop/restart/kill), backup. Sequential execution with time_offset delay.",
     {
       server_id: z.string().describe("Server identifier"),
       schedule_id: z.number().int().positive(),
@@ -233,7 +226,7 @@ export const registerScheduleTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "delete_schedule_task",
-    "Delete a task from a schedule. Subsequent tasks have their sequence_id decremented automatically.",
+    "Delete a task from a schedule.",
     {
       server_id: z.string().describe("Server identifier"),
       schedule_id: z.number().int().positive(),

@@ -4,8 +4,7 @@ import { type ToolRegistrar, jsonResult } from "./context.js";
 export const registerBackupTools: ToolRegistrar = (server, ctx) => {
   server.tool(
     "list_backups",
-    "List backups for a server (paginated). Includes backup uuid, name, size, creation time, " +
-      "lock status, and whether the backup completed successfully.",
+    "List backups with uuid, name, size, status, and lock state. Paginated.",
     {
       server_id: z.string().describe("Server identifier"),
       page: z.number().int().min(1).optional(),
@@ -32,8 +31,7 @@ export const registerBackupTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "create_backup",
-    "Create a new backup for a server. Backup creation is asynchronous: this returns immediately " +
-      "with the new backup descriptor (uuid, status). Poll `get_backup` to check completion.",
+    "Create a backup (async). Poll get_backup for completion.",
     {
       server_id: z.string().describe("Server identifier"),
       name: z.string().max(191).optional().describe("Optional human-readable name"),
@@ -86,10 +84,7 @@ export const registerBackupTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "restore_backup",
-    "Restore a backup over the server's files. " +
-      "DESTRUCTIVE: if `truncate=true`, all current files are deleted before restore. " +
-      "Otherwise the archive is unpacked over existing files (still overwrites collisions). " +
-      "The server must be in a stable state (not currently restoring or installing).",
+    "Restore backup over server files. DESTRUCTIVE if truncate=true (wipes first).",
     {
       server_id: z.string().describe("Server identifier"),
       backup_uuid: z.string().describe("Backup UUID"),
@@ -112,8 +107,7 @@ export const registerBackupTools: ToolRegistrar = (server, ctx) => {
 
   server.tool(
     "get_backup_download_url",
-    "Get a signed, time-limited download URL for a backup. " +
-      "Useful for off-panel inspection or transferring a backup elsewhere.",
+    "Get a signed, time-limited download URL for a backup.",
     {
       server_id: z.string().describe("Server identifier"),
       backup_uuid: z.string().describe("Backup UUID"),

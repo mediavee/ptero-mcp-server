@@ -4,12 +4,7 @@ import { type ToolRegistrar, jsonResult } from "./context.js";
 export const registerPowerTools: ToolRegistrar = (server, ctx) => {
   server.tool(
     "power_action",
-    "Send a power signal to a server. " +
-      "`start` boots the container, `stop` requests a graceful shutdown, " +
-      "`restart` is stop+start, `kill` SIGKILLs the process (data loss risk — only when stuck). " +
-      "Action is asynchronous: the panel acknowledges immediately and the server transitions " +
-      "in the background. Returns `sent_at_ms` so you can feed it directly to `wait_console` " +
-      "as `since_ms` to block on the next state transition without missing any output.",
+    "Send power signal (start/stop/restart/kill). Async — returns `sent_at_ms` for use with wait_console `since_ms`.",
     {
       server_id: z.string().describe("Server identifier"),
       signal: z
