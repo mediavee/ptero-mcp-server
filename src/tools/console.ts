@@ -110,7 +110,7 @@ export const registerConsoleTools: ToolRegistrar = (server, ctx) => {
         .min(1)
         .max(10_000)
         .optional()
-        .describe("Max lines to return (most recent). Default: all buffered."),
+        .describe("Max lines to return (most recent). Default: 100."),
       since_ms: z
         .number()
         .int()
@@ -136,7 +136,7 @@ export const registerConsoleTools: ToolRegistrar = (server, ctx) => {
     async ({ server_id, limit, since_ms, match, ready_timeout_ms }) => {
       try {
         const result = await ctx.consoleHub.tail(server_id, {
-          limit,
+          limit: limit ?? 100,
           sinceMs: since_ms,
           match,
           readyTimeoutMs: ready_timeout_ms,
