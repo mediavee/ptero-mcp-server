@@ -1,5 +1,14 @@
-node_modules
-dist
+__pycache__
+*.py[cod]
+.venv
 .env
 .git
+.gitignore
+.ruff_cache
+.mypy_cache
+.pytest_cache
+dist
+build
+*.egg-info
 *.log
+.DS_Store

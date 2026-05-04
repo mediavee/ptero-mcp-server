@@ -1,4 +1,15 @@
-node_modules/
-dist/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
 .env
+.env.local
 *.log
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+dist/
+build/
+.DS_Store

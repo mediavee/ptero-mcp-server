@@ -2,17 +2,19 @@
 
 An [MCP](https://modelcontextprotocol.io) server that lets AI assistants operate game servers managed by a [Pterodactyl](https://pterodactyl.io) panel. Power actions, live console, commands, backups, schedules, activity log — with a persistent rolling buffer so "what just happened on the server" is always one tool call away.
 
+Built on **[FastMCP 3.x](https://gofastmcp.com)** + Python 3.12 + asyncio. The architecture is intentionally portable: the same skeleton (settings → client → tool registration → custom routes) can host any other Pterodactyl-style integration with minimal churn.
+
 ---
 
 ## Overview
 
 Pterodactyl's REST API is enough to start/stop containers and manage resources, but it does **not** give you a natural way to read live console output, send a command and see its reply, or react to events as they happen. This server fills that gap:
 
-- It keeps a **persistent WebSocket** open to the Wings daemon for every server you touch, with automatic reconnect and JWT refresh.
-- Each session has a **rolling line buffer** (default 5000 lines), so `tail_console` returns the recent past instantly — no polling, no missed output.
+- It keeps a **persistent WebSocket** open to the Wings daemon for every server you touch, with automatic reconnect and JWT refresh every 8 minutes.
+- Each session has a **rolling line buffer** (default 5000 lines, O(1) `deque`), so `tail_console` returns the recent past instantly — no polling, no missed output.
 - A dedicated `run_command` tool **atomically sends a command and captures its reply**, with an optional regex short-circuit. No race on chatty consoles.
 - A `wait_console` tool blocks the current tool call until a matching line arrives — ideal for "restart and tell me when it's back".
-- An **HTTP Server-Sent Events endpoint** (`/streams/:serverId`) streams new lines to arbitrary clients, designed for Claude Code's `Monitor` tool to enable long-running async watchdogs.
+- An **HTTP Server-Sent Events endpoint** (`/streams/:server_id`) streams new lines to arbitrary clients, designed for Claude Code's `Monitor` tool to enable long-running async watchdogs.
 
 The full Pterodactyl client API surface — power, backups, databases, schedules, activity log, resources — is also exposed as typed MCP tools.
 
@@ -27,13 +29,15 @@ The full Pterodactyl client API surface — power, backups, databases, schedules
 - **SSE streaming** for push-style async monitoring via `curl -N` or Claude Code's `Monitor`
 - **Single process, multi-server**: handles any number of Pterodactyl servers concurrently
 - **Bearer-token authenticated** HTTP transport, suitable for private-network or VPN-fronted deployments
+- **Structured JSON-capable logging**, retry-aware HTTP client (3 attempts on 5xx with exponential backoff)
 
 ## Quick start
 
 ### 1. Prerequisites
 
 - A Pterodactyl panel with a Client API key (`Account → API Credentials`)
-- Node 20+ **or** Docker
+- Python **3.12+** **or** Docker
+- (Dev) [`uv`](https://github.com/astral-sh/uv) for dependency management
 
 ### 2. Configure environment
 
@@ -80,7 +84,7 @@ For Claude Desktop or other clients that use JSON config:
 }
 ```
 
-Once connected, the skill file `SKILL.md` bundled at the repo root is picked up automatically by clients that support it, giving the assistant concrete methodology for common flows (restart, diagnose, send command, etc.).
+Once connected, the skill file `SKILL.md` at the repo root is picked up automatically by clients that support it, giving the assistant concrete methodology for common flows (restart, diagnose, send command, etc.).
 
 ## Tools
 
@@ -139,16 +143,16 @@ Pterodactyl's `POST /servers/:id/command` is fire-and-forget: it does not return
 
 ### How it works
 
-`ConsoleHub` maintains one lazy-initialized WebSocket per server, with automatic reconnect, JWT refresh every 8 minutes, and a rolling ring buffer. On top of that, three distinct read patterns are exposed:
+`ConsoleHub` maintains one lazy-initialized WebSocket per server, with automatic reconnect, JWT refresh every 8 minutes, and a rolling ring buffer (`collections.deque`). On top of that, four read patterns are exposed:
 
 | Pattern | Tool | Mechanics |
 |---|---|---|
 | **Past** | `tail_console` | Returns lines already in the buffer, optionally filtered |
 | **Future (sync)** | `wait_console` | Registers a transient listener, blocks up to `wait_ms`, short-circuits on `expect` regex. Optional `since_ms` also scans recently buffered lines — atomic, no race |
 | **Command + reply** | `run_command` | Registers listener **before** sending the command, collects lines for a bounded window **after** the panel accepts it. `expect` regex short-circuits as soon as the reply appears |
-| **Future (async)** | `/streams/:serverId` (SSE) | Streams matching lines to HTTP clients in real time; sessions with active subscribers are exempt from idle reaping |
+| **Future (async)** | `/streams/:server_id` (SSE) | Streams matching lines to HTTP clients in real time; sessions with active subscribers are exempt from idle reaping |
 
-The listener API is built on a single shared primitive (`captureWithListener`) so that adding new read patterns is cheap.
+The listener API is built on a single shared coroutine (`_capture_with_listener`) so adding new read patterns is cheap.
 
 ### Mental model
 
@@ -158,14 +162,14 @@ The listener API is built on a single shared primitive (`captureWithListener`) s
 | Wait for one specific event in the current turn | `wait_console` |
 | Send a command and capture its reply | `run_command` |
 | Send a command and ignore the output | `send_command` |
-| Watch passively over a long duration | `/streams/:serverId` + `Monitor` |
+| Watch passively over a long duration | `/streams/:server_id` + `Monitor` |
 
 ## SSE streaming endpoint
 
 In addition to the MCP tools, the server exposes a raw Server-Sent Events endpoint for push-style consumption:
 
 ```
-GET /streams/:serverId?match=<regex>&include_history_since=<epoch_ms>&ready_timeout_ms=<ms>
+GET /streams/:server_id?match=<regex>&include_history_since=<epoch_ms>&ready_timeout_ms=<ms>
 Authorization: Bearer <MCP_AUTH_TOKEN>
 ```
 
@@ -189,7 +193,7 @@ In Claude Code, plug that into the `Monitor` tool to get async interjections whe
 
 ## Configuration
 
-All configuration is via environment variables.
+All configuration is via environment variables (loaded from process env, then `.env`).
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -200,46 +204,66 @@ All configuration is via environment variables.
 | `HTTP_PORT` | no | `3000` | Bind port |
 | `CONSOLE_BUFFER_SIZE` | no | `5000` | Rolling buffer size per server (lines). Bump on chatty servers where 5000 lines covers only a few seconds |
 | `CONSOLE_IDLE_TTL` | no | `600` | Seconds of inactivity before an unpinned, unwatched console session is closed |
+| `LOG_LEVEL` | no | `INFO` | Logger level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `LOG_JSON` | no | `false` | Emit logs as JSON (recommended for production) |
 
 The included `docker-compose.yml` also honors a `HTTP_BIND` variable for the *host-side* of the port mapping — set it to a Tailscale IP or `127.0.0.1` to avoid exposing the server on public interfaces.
 
 ## Development
 
+Use `uv` for the local toolchain:
+
 ```bash
-npm install
-npm run build      # tsc — one-shot build
-npm run dev        # tsc --watch — rebuild on change
-npm start          # node dist/index.js (after build)
+uv sync                          # create .venv + install deps
+uv run ptero-mcp                 # run the server
+uv run python -m ptero_mcp       # equivalent
+uv run ruff check src            # lint
+uv run ruff format src           # format
 ```
 
-The codebase is small and flat:
+The codebase is small, async-first, and flat:
 
 ```
-src/
-├── index.ts           # Express + MCP HTTP transport + SSE endpoint + shutdown
-├── auth.ts            # Bearer token middleware
-├── config.ts          # Env var loader
-├── ptero/
-│   ├── client.ts      # Thin Pterodactyl Client API wrapper
-│   └── console-hub.ts # Persistent WS hub, ring buffer, listener plumbing
+src/ptero_mcp/
+├── __main__.py        # python -m ptero_mcp / console script entry
+├── server.py          # FastMCP app + lifespan + ASGI wiring + uvicorn
+├── config.py          # pydantic-settings: typed env loading
+├── logging.py         # structlog config (text or JSON)
+├── auth.py            # Bearer token middleware (constant-time compare)
+├── client.py          # httpx-based PterodactylClient (retry, backoff)
+├── console_hub.py     # Persistent WS hub, ring buffer, listener plumbing
+├── streams.py         # SSE endpoint (Starlette streaming response)
+├── context.py         # Shared dependency container (ToolContext)
 └── tools/
-    ├── register.ts    # Tool registration entry point
-    ├── context.ts     # Shared helpers (jsonResult, errorResult, ToolContext)
-    ├── servers.ts     # Discovery & state
-    ├── power.ts       # power_action
-    ├── console.ts     # tail / wait / run / send / watch / list sessions
-    ├── activity.ts    # get_activity_log
-    ├── backups.ts
-    ├── databases.ts
-    └── schedules.ts
+    ├── __init__.py    # register_all(mcp, ctx)
+    ├── _common.py     # Shared error mapping + helpers
+    ├── servers.py     # list_servers, get_server, get_resources
+    ├── power.py       # power_action
+    ├── console.py     # tail / wait / run / send / watch / list sessions
+    ├── activity.py    # get_activity_log
+    ├── backups.py
+    ├── databases.py
+    └── schedules.py
 ```
+
+## Reusing this skeleton for other MCPs
+
+The wiring is intentionally generic. To start a new MCP service from this template:
+
+1. Replace `client.py` with your upstream API wrapper (httpx async, retry-aware).
+2. Replace `console_hub.py` with whatever stateful background subsystem you need (or delete it).
+3. Add a tool module per logical domain in `tools/` and register it in `tools/__init__.py`.
+4. Update `Settings` in `config.py` with the env vars you need; `pydantic-settings` validates them at startup.
+5. Add custom HTTP routes in `server.py` next to `/healthz` and `/streams/{server_id}`.
+
+Everything else — auth middleware, FastMCP lifespan, structured logging, Docker, healthcheck — is reusable as-is.
 
 ## Deployment notes
 
 - **Security.** `MCP_AUTH_TOKEN` is the only thing between the network and your Pterodactyl panel. Bind to a private interface (Tailscale, VPN, or loopback behind a trusted reverse proxy) in any real deployment. `.env` is in `.gitignore` — keep it that way.
 - **Reverse proxies.** If you front the server with nginx / Caddy / Traefik, disable response buffering on `/streams/*` so SSE events are flushed immediately. The server already sets `X-Accel-Buffering: no`.
 - **Multi-server.** A single process handles any number of Pterodactyl servers concurrently. Sessions are created lazily on first reference and reaped after `CONSOLE_IDLE_TTL` seconds of inactivity unless pinned (`watch_server`) or holding active SSE subscribers.
-- **Graceful shutdown.** `SIGTERM` / `SIGINT` closes all sessions, transports, and SSE connections, then exits. A 10-second timeout forces exit if anything hangs.
+- **Graceful shutdown.** `SIGTERM` / `SIGINT` closes all sessions, transports, and SSE connections, then exits. Uvicorn's 10-second graceful-shutdown timeout forces exit if anything hangs.
 
 ## License
 
