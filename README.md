@@ -35,7 +35,7 @@ The full Pterodactyl client API surface — power, backups, databases, schedules
 
 ### 1. Prerequisites
 
-- A Pterodactyl panel with a Client API key (`Account → API Credentials`)
+- One or more Pterodactyl panels with a Client API key per operator (`Account → API Credentials`)
 - Python **3.12+** **or** Docker
 - (Dev) [`uv`](https://github.com/astral-sh/uv) for dependency management
 
@@ -45,11 +45,9 @@ The full Pterodactyl client API surface — power, backups, databases, schedules
 cp .env.example .env
 ```
 
-Fill in the three required values:
+Only `MCP_AUTH_TOKEN` is required server-side. The panel URL and Client API key are **not** stored on the server — each MCP client passes them on every request via `X-Pterodactyl-Url` and `X-Pterodactyl-Key` headers (see Multi-panel usage below).
 
 ```env
-PTERODACTYL_URL=https://panel.example.com
-PTERODACTYL_API_KEY=ptlc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 MCP_AUTH_TOKEN=$(openssl rand -hex 32)
 ```
 
@@ -63,9 +61,18 @@ The server listens on `http://0.0.0.0:3000/mcp` by default. A `/healthz` endpoin
 
 ### 4. Connect Claude Code
 
+One MCP entry per (panel, operator key) pair, all pointing at the same server with different headers:
+
 ```bash
-claude mcp add ptero --transport http http://localhost:3000/mcp \
-  --header "Authorization: Bearer $MCP_AUTH_TOKEN"
+claude mcp add ptero-prod --transport http http://localhost:3000/mcp \
+  --header "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  --header "X-Pterodactyl-Url: https://panel.prod.example.com" \
+  --header "X-Pterodactyl-Key: $PTERO_PROD_KEY"
+
+claude mcp add ptero-staging --transport http http://localhost:3000/mcp \
+  --header "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  --header "X-Pterodactyl-Url: https://panel.staging.example.com" \
+  --header "X-Pterodactyl-Key: $PTERO_STAGING_KEY"
 ```
 
 For Claude Desktop or other clients that use JSON config:
@@ -73,18 +80,30 @@ For Claude Desktop or other clients that use JSON config:
 ```json
 {
   "mcpServers": {
-    "ptero": {
+    "ptero-prod": {
       "type": "http",
       "url": "http://localhost:3000/mcp",
       "headers": {
-        "Authorization": "Bearer <your token>"
+        "Authorization": "Bearer <your bearer token>",
+        "X-Pterodactyl-Url": "https://panel.prod.example.com",
+        "X-Pterodactyl-Key": "<your prod client API key>"
       }
     }
   }
 }
 ```
 
-Once connected, the skill file `SKILL.md` at the repo root is picked up automatically by clients that support it, giving the assistant concrete methodology for common flows (restart, diagnose, send command, etc.).
+Once connected, the skill file [`SKILL.md`](./SKILL.md) at the repo root is picked up automatically by clients that support it, giving the assistant concrete methodology for common flows (restart, diagnose, send command, etc.).
+
+## Multi-panel usage
+
+A single `ptero-mcp` instance serves any number of Pterodactyl panels and any number of operator keys. The server holds **no panel URL and no API key** in its config — every `/mcp` and `/streams/*` request must include `X-Pterodactyl-Url` and `X-Pterodactyl-Key` headers, and the server uses them for the upstream Pterodactyl call.
+
+- Per-request credentials live in your MCP client config (Claude Code/Desktop), one entry per (panel, key) pair.
+- Console buffers are isolated per `(panel_url, api_key, server_id)` triple — two operators with different keys never see each other's buffer for the same server, even on the same panel. This is enforced via Python `ContextVar`s set by the auth middleware.
+- `list_console_sessions` only returns sessions belonging to the current request's credentials.
+- The SSE endpoint at `/streams/:server_id` requires the same headers (the secret cannot live in the URL because the SSE stream is long-lived).
+- Requests missing either header are rejected with HTTP 400 before reaching FastMCP.
 
 ## Tools
 
@@ -171,7 +190,11 @@ In addition to the MCP tools, the server exposes a raw Server-Sent Events endpoi
 ```
 GET /streams/:server_id?match=<regex>&include_history_since=<epoch_ms>&ready_timeout_ms=<ms>
 Authorization: Bearer <MCP_AUTH_TOKEN>
+X-Pterodactyl-Url: https://panel.example.com
+X-Pterodactyl-Key: <client API key>
 ```
+
+The same `(panel, key, server)` isolation as `/mcp` applies — the SSE stream attaches to the buffer of the calling operator's panel + key combination only.
 
 Events:
 
@@ -185,7 +208,10 @@ Events:
 Example — tail `abc12345` for any error or exception:
 
 ```bash
-curl -N -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+curl -N \
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -H "X-Pterodactyl-Url: https://panel.example.com" \
+  -H "X-Pterodactyl-Key: $PTERO_KEY" \
   "http://ptero-mcp:3000/streams/abc12345?match=ERROR%7CException%7Ccrash"
 ```
 
@@ -197,15 +223,15 @@ All configuration is via environment variables (loaded from process env, then `.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `PTERODACTYL_URL` | yes | — | Panel URL, no trailing slash |
-| `PTERODACTYL_API_KEY` | yes | — | Client API key from `Account → API Credentials` |
 | `MCP_AUTH_TOKEN` | yes | — | Bearer token required by every client. Generate with `openssl rand -hex 32` |
 | `HTTP_HOST` | no | `0.0.0.0` | Bind host for the HTTP listener |
 | `HTTP_PORT` | no | `3000` | Bind port |
-| `CONSOLE_BUFFER_SIZE` | no | `5000` | Rolling buffer size per server (lines). Bump on chatty servers where 5000 lines covers only a few seconds |
+| `CONSOLE_BUFFER_SIZE` | no | `5000` | Rolling buffer size per (panel, key, server) session. Bump on chatty servers where 5000 lines covers only a few seconds |
 | `CONSOLE_IDLE_TTL` | no | `600` | Seconds of inactivity before an unpinned, unwatched console session is closed |
 | `LOG_LEVEL` | no | `INFO` | Logger level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `LOG_JSON` | no | `false` | Emit logs as JSON (recommended for production) |
+
+The panel URL and Client API key are **not** env vars — they are supplied per-request by the MCP client through the `X-Pterodactyl-Url` and `X-Pterodactyl-Key` headers (see Multi-panel usage above).
 
 The included `docker-compose.yml` also honors a `HTTP_BIND` variable for the *host-side* of the port mapping — set it to a Tailscale IP or `127.0.0.1` to avoid exposing the server on public interfaces.
 
@@ -260,9 +286,9 @@ Everything else — auth middleware, FastMCP lifespan, structured logging, Docke
 
 ## Deployment notes
 
-- **Security.** `MCP_AUTH_TOKEN` is the only thing between the network and your Pterodactyl panel. Bind to a private interface (Tailscale, VPN, or loopback behind a trusted reverse proxy) in any real deployment. `.env` is in `.gitignore` — keep it that way.
+- **Security.** Panel URLs and Client API keys travel in headers (`X-Pterodactyl-Url`, `X-Pterodactyl-Key`). The server does not log them and does not persist them. **TLS in front is non-negotiable** unless the listener is bound to loopback or a private network (Tailscale, WireGuard). `MCP_AUTH_TOKEN` gates access at the bearer layer. `.env` is in `.gitignore` — keep it that way.
 - **Reverse proxies.** If you front the server with nginx / Caddy / Traefik, disable response buffering on `/streams/*` so SSE events are flushed immediately. The server already sets `X-Accel-Buffering: no`.
-- **Multi-server.** A single process handles any number of Pterodactyl servers concurrently. Sessions are created lazily on first reference and reaped after `CONSOLE_IDLE_TTL` seconds of inactivity unless pinned (`watch_server`) or holding active SSE subscribers.
+- **Multi-panel, multi-operator.** A single process handles any number of panels and any number of operator keys concurrently. Console sessions are keyed by `(panel_url, api_key, server_id)` for strict isolation — different keys never share a buffer, even on the same panel. Sessions are reaped after `CONSOLE_IDLE_TTL` seconds of inactivity unless pinned (`watch_server`) or holding active SSE subscribers.
 - **Graceful shutdown.** `SIGTERM` / `SIGINT` closes all sessions, transports, and SSE connections, then exits. Uvicorn's 10-second graceful-shutdown timeout forces exit if anything hangs.
 
 ## License

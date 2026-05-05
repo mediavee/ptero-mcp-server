@@ -17,7 +17,11 @@ from starlette.routing import Mount
 
 from ptero_mcp import __version__
 from ptero_mcp.auth import bearer_auth
-from ptero_mcp.client import PterodactylClient
+from ptero_mcp.client import (
+    PterodactylClient,
+    current_api_key,
+    current_panel_url,
+)
 from ptero_mcp.config import Settings, load_settings
 from ptero_mcp.console_hub import ConsoleHub
 from ptero_mcp.context import ToolContext
@@ -84,9 +88,10 @@ def build_asgi_app(settings: Settings) -> Starlette:
             await console_hub.start()
             log.info(
                 "ptero_mcp_started",
-                panel=settings.panel_base,
+                version=__version__,
                 buffer_size=settings.console_buffer_size,
                 idle_ttl_s=settings.console_idle_ttl,
+                credentials_source="per_request_headers",
             )
             try:
                 yield
@@ -104,7 +109,7 @@ def build_asgi_app(settings: Settings) -> Starlette:
 
 
 class _AuthMiddleware(BaseHTTPMiddleware):
-    """Bearer-token gate for everything except /healthz."""
+    """Bearer-token + per-request panel/key gate. Skipped on /healthz."""
 
     def __init__(self, app, expected_token: str) -> None:
         super().__init__(app)
@@ -113,7 +118,55 @@ class _AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path == "/healthz":
             return await call_next(request)
-        return await self._guard(request, call_next)
+
+        async def with_credentials(req: Request) -> Response:
+            panel_url = req.headers.get("x-pterodactyl-url", "").strip()
+            api_key = req.headers.get("x-pterodactyl-key", "").strip()
+            if not panel_url or not api_key:
+                return _missing_creds_response()
+            if not (panel_url.startswith("http://") or panel_url.startswith("https://")):
+                return _bad_panel_url_response()
+            url_token = current_panel_url.set(panel_url)
+            key_token = current_api_key.set(api_key)
+            try:
+                return await call_next(req)
+            finally:
+                current_api_key.reset(key_token)
+                current_panel_url.reset(url_token)
+
+        return await self._guard(request, with_credentials)
+
+
+def _missing_creds_response() -> JSONResponse:
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32602,
+                "message": (
+                    "Missing X-Pterodactyl-Url and/or X-Pterodactyl-Key header. "
+                    "Configure your MCP client to send the panel URL and a Client "
+                    "API key on every request."
+                ),
+            },
+            "id": None,
+        },
+        status_code=400,
+    )
+
+
+def _bad_panel_url_response() -> JSONResponse:
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32602,
+                "message": "X-Pterodactyl-Url must start with http:// or https://",
+            },
+            "id": None,
+        },
+        status_code=400,
+    )
 
 
 async def run() -> None:
@@ -139,7 +192,5 @@ async def run() -> None:
         mcp_url=f"http://{settings.http_host}:{settings.http_port}/mcp",
         sse_url=f"http://{settings.http_host}:{settings.http_port}/streams/<server_id>",
     )
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await server.serve()
-    except asyncio.CancelledError:
-        pass

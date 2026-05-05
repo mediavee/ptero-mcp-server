@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,12 @@ class Settings(BaseSettings):
 
     Values are loaded from process environment, then ``.env`` (if present).
     Field names use snake_case; env vars use SCREAMING_SNAKE_CASE.
+
+    Panel URL and API key are **not** loaded here — they are provided
+    per-request via the ``X-Pterodactyl-Url`` and ``X-Pterodactyl-Key``
+    HTTP headers so a single instance can serve any number of panels and
+    operators with strict isolation (one console buffer per
+    panel + key + server triple).
     """
 
     model_config = SettingsConfigDict(
@@ -20,8 +26,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    pterodactyl_url: HttpUrl = Field(..., description="Panel base URL.")
-    pterodactyl_api_key: SecretStr = Field(..., description="Client API key.")
     mcp_auth_token: SecretStr = Field(..., description="Bearer token for HTTP clients.")
 
     http_host: str = Field("0.0.0.0", description="HTTP bind host.")
@@ -34,18 +38,6 @@ class Settings(BaseSettings):
 
     log_level: str = Field("INFO", description="Logger level (DEBUG, INFO, WARNING, ERROR).")
     log_json: bool = Field(False, description="Emit logs as JSON.")
-
-    @field_validator("pterodactyl_url", mode="before")
-    @classmethod
-    def _strip_trailing_slash(cls, v: object) -> object:
-        if isinstance(v, str):
-            return v.rstrip("/")
-        return v
-
-    @property
-    def panel_base(self) -> str:
-        """Pterodactyl URL without trailing slash, as a plain string."""
-        return str(self.pterodactyl_url).rstrip("/")
 
     @property
     def console_idle_ttl_ms(self) -> int:

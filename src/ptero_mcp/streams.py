@@ -28,6 +28,7 @@ from dataclasses import asdict
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from ptero_mcp.client import use_credentials
 from ptero_mcp.console_hub import ConsoleHub, ConsoleLine
 from ptero_mcp.logging import get_logger
 
@@ -43,6 +44,18 @@ def make_sse_handler(console_hub: ConsoleHub):
         server_id = request.path_params.get("server_id")
         if not isinstance(server_id, str) or not server_id:
             return JSONResponse({"error": "Missing serverId path parameter"}, status_code=400)
+
+        # Read credential headers in the handler so they're available when the
+        # async generator body actually executes (which happens AFTER the auth
+        # middleware exits its `with`-block and resets the contextvars). The
+        # generator re-establishes the context via ``use_credentials``.
+        panel_url = request.headers.get("x-pterodactyl-url", "").strip()
+        api_key = request.headers.get("x-pterodactyl-key", "").strip()
+        if not panel_url or not api_key:
+            return JSONResponse(
+                {"error": "Missing X-Pterodactyl-Url / X-Pterodactyl-Key header"},
+                status_code=400,
+            )
 
         match_param = request.query_params.get("match")
         history_since_raw = request.query_params.get("include_history_since")
@@ -80,6 +93,8 @@ def make_sse_handler(console_hub: ConsoleHub):
             _event_stream(
                 console_hub,
                 server_id,
+                panel_url,
+                api_key,
                 match_regex,
                 history_since_ms,
                 ready_timeout_ms,
@@ -100,6 +115,8 @@ def make_sse_handler(console_hub: ConsoleHub):
 async def _event_stream(
     console_hub: ConsoleHub,
     server_id: str,
+    panel_url: str,
+    api_key: str,
     match_regex: re.Pattern[str] | None,
     history_since_ms: int | None,
     ready_timeout_ms: int,
@@ -116,13 +133,18 @@ async def _event_stream(
     match_pattern = match_regex.pattern if match_regex is not None else None
     yield _format_event("ready", {"serverId": server_id, "match": match_pattern})
 
+    # ``subscribe`` reads contextvars to compute the (panel, key, server)
+    # session key. The generator body runs after the auth middleware has
+    # already reset its contextvars, so we re-establish them here for the
+    # duration of the stream.
     try:
-        sub = await console_hub.subscribe(
-            server_id,
-            listener,
-            history_since_ms=history_since_ms,
-            ready_timeout_ms=ready_timeout_ms,
-        )
+        with use_credentials(panel_url, api_key):
+            sub = await console_hub.subscribe(
+                server_id,
+                listener,
+                history_since_ms=history_since_ms,
+                ready_timeout_ms=ready_timeout_ms,
+            )
     except Exception as exc:  # noqa: BLE001
         yield _format_event("error", {"message": str(exc)})
         return

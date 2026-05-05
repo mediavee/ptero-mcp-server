@@ -160,3 +160,4 @@ For `get_activity_log`, each entry embeds the acting user under `attributes.rela
 - **Buffer size is bounded** (default 5000 lines). For very long backlogs, the oldest lines have been evicted — note this in your analysis if relevant. On very chatty servers, use `match` on `tail_console` to filter noise early.
 - **`send_command` / `run_command` return a clean 502 error if the server isn't running.** Don't preflight with `get_resources` — just handle the error if it comes. Saves a round-trip.
 - **Console buffer is per MCP-server instance.** If the MCP server restarted, all buffers are empty until new output arrives.
+- **Buffers are isolated per panel + operator key.** Two MCP entries pointing at the same panel with different API keys don't share buffers — `list_console_sessions` only shows what *your* current credentials own. Routine; no operator action needed.
