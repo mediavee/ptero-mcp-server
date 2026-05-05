@@ -68,7 +68,7 @@ class PterodactylError(Exception):
 
 
 class WebsocketCredentials:
-    __slots__ = ("token", "socket")
+    __slots__ = ("socket", "token")
 
     def __init__(self, token: str, socket: str) -> None:
         self.token = token
@@ -129,19 +129,43 @@ class PterodactylClient:
             except httpx.RequestError as exc:
                 last_exc = exc
                 if attempt == retries - 1:
+                    log.error(
+                        "panel_request_network_error",
+                        method=method,
+                        path=path,
+                        attempt=attempt + 1,
+                        error=str(exc),
+                    )
                     raise PterodactylError(
                         f"Pterodactyl API {method} {path} network error: {exc}", 0, None
                     ) from exc
+                log.warning(
+                    "panel_request_network_retry",
+                    method=method,
+                    path=path,
+                    attempt=attempt + 1,
+                    backoff_s=backoff,
+                    error=str(exc),
+                )
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 continue
 
             if resp.status_code >= 500 and attempt < retries - 1:
+                log.warning(
+                    "panel_request_server_error_retry",
+                    method=method,
+                    path=path,
+                    status=resp.status_code,
+                    attempt=attempt + 1,
+                    backoff_s=backoff,
+                )
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 continue
 
             if resp.status_code == 204:
+                log.debug("panel_request", method=method, path=path, status=204)
                 return None
 
             parsed: Any
@@ -155,6 +179,13 @@ class PterodactylClient:
                 parsed = None
 
             if not resp.is_success:
+                log.warning(
+                    "panel_request_failed",
+                    method=method,
+                    path=path,
+                    status=resp.status_code,
+                    body=parsed,
+                )
                 raise PterodactylError(
                     f"Pterodactyl API {method} {path} failed: "
                     f"{resp.status_code} {resp.reason_phrase}",
@@ -162,6 +193,7 @@ class PterodactylClient:
                     parsed,
                 )
 
+            log.debug("panel_request", method=method, path=path, status=resp.status_code)
             return parsed
 
         # Unreachable: loop either returns or raises.

@@ -145,7 +145,7 @@ async def _event_stream(
                 history_since_ms=history_since_ms,
                 ready_timeout_ms=ready_timeout_ms,
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         yield _format_event("error", {"message": str(exc)})
         return
 

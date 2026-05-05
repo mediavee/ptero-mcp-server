@@ -146,6 +146,10 @@ class _Session:
     ws: ClientConnection | None = None
     runner_task: asyncio.Task[None] | None = None
     refresh_task: asyncio.Task[None] | None = None
+    # Strong refs for fire-and-forget tasks. Without this set, asyncio.create_task
+    # results would be only weakly held by the loop (3.11.1+) and could be GC'd
+    # mid-flight — silently losing auth/refresh/log-pull WS sends.
+    bg_tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
 
 class ConsoleHub:
@@ -160,6 +164,20 @@ class ConsoleHub:
         self._sessions: dict[SessionKey, _Session] = {}
         self._reaper_task: asyncio.Task[None] | None = None
         self._sessions_lock = asyncio.Lock()
+        # Strong refs for fire-and-forget close tasks fired by the reaper.
+        self._close_tasks: set[asyncio.Task[None]] = set()
+
+    @staticmethod
+    def _spawn(session: _Session, coro: Awaitable[Any]) -> asyncio.Task[Any]:
+        """Schedule a fire-and-forget task and keep a strong ref on the session.
+
+        Without this set, ``asyncio.create_task`` results would be only weakly
+        referenced by the loop (CPython 3.11.1+) and could be GC'd mid-flight.
+        """
+        task = asyncio.create_task(coro)
+        session.bg_tasks.add(task)
+        task.add_done_callback(session.bg_tasks.discard)
+        return task
 
     @staticmethod
     def _current_creds() -> tuple[str, str]:
@@ -379,7 +397,7 @@ class ConsoleHub:
                 try:
                     await self._connect_and_pump(session)
                     attempt = 0  # reset after a clean disconnect
-                except Exception as exc:  # noqa: BLE001 — log + continue
+                except Exception as exc:
                     log.warning(
                         "console_session_disconnect",
                         server_id=session.server_id,
@@ -441,7 +459,7 @@ class ConsoleHub:
                 try:
                     creds = await self._client.get_websocket_credentials(session.server_id)
                     await session.ws.send(json.dumps({"event": "auth", "args": [creds.token]}))
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     log.error(
                         "token_refresh_failed",
                         server_id=session.server_id,
@@ -464,8 +482,12 @@ class ConsoleHub:
             # Pull recent history and a stats snapshot.
             ws = session.ws
             if ws is not None:
-                asyncio.create_task(ws.send(json.dumps({"event": "send logs", "args": []})))
-                asyncio.create_task(ws.send(json.dumps({"event": "send stats", "args": []})))
+                self._spawn(
+                    session, ws.send(json.dumps({"event": "send logs", "args": []}))
+                )
+                self._spawn(
+                    session, ws.send(json.dumps({"event": "send stats", "args": []}))
+                )
             session.ready.set()
 
         elif event in ("console output", "install output"):
@@ -486,13 +508,11 @@ class ConsoleHub:
         elif event == "stats":
             payload = args[0] if args else None
             if isinstance(payload, str):
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     session.last_stats = json.loads(payload)
-                except json.JSONDecodeError:
-                    pass
 
         elif event in ("token expiring", "token expired"):
-            asyncio.create_task(self._refresh_now(session))
+            self._spawn(session, self._refresh_now(session))
 
         elif event in ("jwt error", "daemon error"):
             log.error(
@@ -508,7 +528,7 @@ class ConsoleHub:
         try:
             creds = await self._client.get_websocket_credentials(session.server_id)
             await session.ws.send(json.dumps({"event": "auth", "args": [creds.token]}))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.error("token_refresh_failed", server_id=session.server_id, error=str(exc))
 
     def _fanout(self, session: _Session, entry: ConsoleLine) -> None:
@@ -517,7 +537,7 @@ class ConsoleHub:
         for listener in list(session.line_listeners):
             try:
                 listener(entry)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 log.error(
                     "line_listener_error",
                     server_id=session.server_id,
@@ -552,10 +572,8 @@ class ConsoleHub:
                 # Reset so the elapsed window only counts the listening phase.
                 timer_start = time.monotonic()
 
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(done, timeout=wait_ms / 1000)
-            except TimeoutError:
-                pass
         finally:
             session.line_listeners.discard(listener)
             session.last_access = time.monotonic()
@@ -612,7 +630,9 @@ class ConsoleHub:
 
         for key, session in to_close:
             self._sessions.pop(key, None)
-            asyncio.create_task(self._close_session(session))
+            task = asyncio.create_task(self._close_session(session))
+            self._close_tasks.add(task)
+            task.add_done_callback(self._close_tasks.discard)
 
     async def _close_session(self, session: _Session) -> None:
         session.closed = True
