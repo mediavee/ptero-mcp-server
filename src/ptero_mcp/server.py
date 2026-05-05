@@ -26,7 +26,6 @@ from ptero_mcp.config import Settings, load_settings
 from ptero_mcp.console_hub import ConsoleHub
 from ptero_mcp.context import ToolContext
 from ptero_mcp.logging import configure_logging, get_logger
-from ptero_mcp.streams import make_sse_handler
 from ptero_mcp.tools import register_all
 
 log = get_logger(__name__)
@@ -35,7 +34,7 @@ log = get_logger(__name__)
 def build_mcp(
     settings: Settings,
 ) -> tuple[FastMCP, ConsoleHub, PterodactylClient]:
-    """Build the FastMCP server, register tools and the SSE / health routes.
+    """Build the FastMCP server, register tools and the health route.
 
     Returns the configured FastMCP plus the long-lived components driven by
     the ASGI lifespan (so they can be reused in tests or alternate transports).
@@ -58,12 +57,6 @@ def build_mcp(
     @mcp.custom_route("/healthz", methods=["GET"])
     async def healthz(_request: Request) -> Response:
         return JSONResponse({"status": "ok", "version": __version__})
-
-    sse_handler = make_sse_handler(console_hub)
-
-    @mcp.custom_route("/streams/{server_id}", methods=["GET"])
-    async def stream(request: Request) -> Response:
-        return await sse_handler(request)
 
     return mcp, console_hub, client
 
@@ -190,7 +183,6 @@ async def run() -> None:
         host=settings.http_host,
         port=settings.http_port,
         mcp_url=f"http://{settings.http_host}:{settings.http_port}/mcp",
-        sse_url=f"http://{settings.http_host}:{settings.http_port}/streams/<server_id>",
     )
     with contextlib.suppress(asyncio.CancelledError):
         await server.serve()
