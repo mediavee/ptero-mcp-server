@@ -1,4 +1,7 @@
-"""Structured logging setup based on structlog."""
+"""Structured logging setup based on structlog.
+
+All output goes to stderr — stdout is reserved for the MCP JSON-RPC stream.
+"""
 
 from __future__ import annotations
 
@@ -26,18 +29,18 @@ def configure_logging(level: str = "INFO", json_output: bool = False) -> None:
     if json_output:
         renderer = structlog.processors.JSONRenderer()
     else:
-        renderer = structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty())
+        renderer = structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty())
 
     structlog.configure(
         processors=[*shared_processors, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(level_value),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         cache_logger_on_first_use=True,
     )
 
-    # Bridge stdlib logging (uvicorn/httpx/websockets) into structlog format.
-    handler = logging.StreamHandler(sys.stdout)
+    # Bridge stdlib logging (httpx/websockets) into structlog format on stderr.
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(
             processor=renderer,

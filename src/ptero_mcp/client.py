@@ -3,13 +3,14 @@
 Only methods used by the MCP tools are implemented. Responses are returned as
 parsed JSON; the panel uses a JSON:API-flavored ``object``/``attributes``
 fractal envelope — callers are responsible for unwrapping when they care.
+
+Auth is configured at startup via ``PTERODACTYL_URL`` / ``PTERODACTYL_KEY``
+env vars and baked into the httpx client.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-from contextvars import ContextVar
 from typing import Any, Literal
 
 import httpx
@@ -23,39 +24,6 @@ log = get_logger(__name__)
 PowerSignal = Literal["start", "stop", "restart", "kill"]
 ScheduleAction = Literal["command", "power", "backup"]
 ActivitySort = Literal["timestamp", "-timestamp"]
-
-
-# Set per-request by the HTTP middleware from X-Pterodactyl-Url /
-# X-Pterodactyl-Key headers. Read by every client method so a single
-# PterodactylClient instance can serve any number of panels and operator
-# keys with strict isolation.
-current_panel_url: ContextVar[str | None] = ContextVar("ptero_panel_url", default=None)
-current_api_key: ContextVar[str | None] = ContextVar("ptero_api_key", default=None)
-
-
-class MissingCredentialsError(RuntimeError):
-    """Raised when a tool runs without panel URL and API key in the request context."""
-
-
-@contextlib.contextmanager
-def use_credentials(panel_url: str, api_key: str):
-    """Set both contextvars for the body of the ``with`` block.
-
-    Used by the console hub's background tasks (run loop, refresh loop) to
-    authenticate Pterodactyl calls outside the originating request task.
-    """
-    url_token = current_panel_url.set(panel_url)
-    key_token = current_api_key.set(api_key)
-    try:
-        yield
-    finally:
-        current_api_key.reset(key_token)
-        current_panel_url.reset(url_token)
-
-
-def _normalise_panel_url(value: str) -> str:
-    """Strip trailing slash. The middleware already validated the scheme."""
-    return value.rstrip("/")
 
 
 class PterodactylError(Exception):
@@ -76,18 +44,17 @@ class WebsocketCredentials:
 
 
 class PterodactylClient:
-    """Thin async wrapper over the Pterodactyl Client API.
-
-    Holds a long-lived TCP pool (``httpx.AsyncClient`` with no base URL),
-    but reads the panel URL and API key from contextvars on every request
-    so the same client serves any panel and any operator without leaking
-    credentials between concurrent requests.
-    """
+    """Thin async wrapper over the Pterodactyl Client API."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self.panel_url = settings.panel_url
         self._http = httpx.AsyncClient(
-            headers={"Accept": "application/json"},
+            base_url=f"{self.panel_url}/api/client",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {settings.pterodactyl_key.get_secret_value()}",
+            },
             timeout=httpx.Timeout(30.0, connect=10.0),
             transport=httpx.AsyncHTTPTransport(retries=2),
         )
@@ -108,23 +75,12 @@ class PterodactylClient:
     ) -> Any:
         params = {k: v for k, v in (query or {}).items() if v is not None}
 
-        panel_url = current_panel_url.get()
-        api_key = current_api_key.get()
-        if not panel_url or not api_key:
-            raise MissingCredentialsError(
-                "No Pterodactyl panel URL / API key in request context — "
-                "the HTTP middleware should have rejected this request earlier."
-            )
-
-        url = _normalise_panel_url(panel_url) + "/api/client" + (path or "")
-        request_headers = {"Authorization": f"Bearer {api_key}"}
-
         last_exc: Exception | None = None
         backoff = 0.4
         for attempt in range(retries):
             try:
                 resp = await self._http.request(
-                    method, url, params=params, json=body, headers=request_headers
+                    method, path, params=params, json=body
                 )
             except httpx.RequestError as exc:
                 last_exc = exc

@@ -42,15 +42,8 @@ If the user is debugging Minecraft from a node-side perspective (filesystem, plu
 **Quick mental model:**
 - Past → `tail_console`
 - Future (short, synchronous, in this turn) → `wait_console`
-- Future (long, async, in the background, multi-event) → SSE stream + `Monitor` tool (see below)
 - Command + its response → `run_command`
 - Fire and forget → `send_command`
-
-### Async watchdog (rare)
-
-For long-running passive monitoring (> 2 min, multi-event, running in the background while you do other work), the MCP also exposes a raw SSE endpoint: `GET /streams/:serverId?match=<regex>` with `Authorization: Bearer <token>`. Events: `ready`, `line`, `error`. Consume it via Claude Code's `Monitor` tool with `curl -N`.
-
-**This is a niche path.** Use it only when the user explicitly asks to "watch" or "monitor" something passively over a long duration, or wants to react to multiple events. For everything else (restart confirmation, single event, command response), prefer `wait_console` — it is synchronous, portable, and does not require the user to have pre-configured the MCP base URL and token as environment variables.
 
 ### Audit
 - `get_activity_log` — paginated panel events (power, console.command, file, backup, schedule…). NOT console output.

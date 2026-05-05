@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
-from ptero_mcp.server import run
+from ptero_mcp.server import run_async
 
 
 def main() -> None:
-    asyncio.run(run())
+    asyncio.run(run_async())
 
 
 if __name__ == "__main__":

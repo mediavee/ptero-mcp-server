@@ -20,21 +20,11 @@ from typing import Any
 import websockets
 from websockets.asyncio.client import ClientConnection
 
-from ptero_mcp.client import (
-    MissingCredentialsError,
-    PterodactylClient,
-    current_api_key,
-    current_panel_url,
-    use_credentials,
-)
+from ptero_mcp.client import PterodactylClient
 from ptero_mcp.config import Settings
 from ptero_mcp.logging import get_logger
 
 log = get_logger(__name__)
-
-
-SessionKey = tuple[str, str, str]
-"""(panel_url, api_key, server_id) — strict isolation per operator and panel."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -132,8 +122,6 @@ def _compile_regex(pattern: str | None, label: str) -> re.Pattern[str] | None:
 @dataclass(slots=True)
 class _Session:
     server_id: str
-    panel_url: str
-    api_key: str
     buffer: deque[ConsoleLine]
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     last_access: float = field(default_factory=time.monotonic)
@@ -161,7 +149,7 @@ class ConsoleHub:
     def __init__(self, settings: Settings, client: PterodactylClient) -> None:
         self._settings = settings
         self._client = client
-        self._sessions: dict[SessionKey, _Session] = {}
+        self._sessions: dict[str, _Session] = {}
         self._reaper_task: asyncio.Task[None] | None = None
         self._sessions_lock = asyncio.Lock()
         # Strong refs for fire-and-forget close tasks fired by the reaper.
@@ -178,17 +166,6 @@ class ConsoleHub:
         session.bg_tasks.add(task)
         task.add_done_callback(session.bg_tasks.discard)
         return task
-
-    @staticmethod
-    def _current_creds() -> tuple[str, str]:
-        panel_url = current_panel_url.get()
-        api_key = current_api_key.get()
-        if not panel_url or not api_key:
-            raise MissingCredentialsError(
-                "No Pterodactyl panel URL / API key in request context — "
-                "the HTTP middleware should have rejected this request earlier."
-            )
-        return panel_url, api_key
 
     # ─────────────────────────────── lifecycle ───────────────────────────────
 
@@ -327,26 +304,13 @@ class ConsoleHub:
         return {"server_id": server_id, "pinned": True}
 
     def unwatch(self, server_id: str) -> dict[str, Any]:
-        try:
-            panel_url, api_key = self._current_creds()
-        except MissingCredentialsError:
-            return {"server_id": server_id, "pinned": False, "closed": False}
-        session = self._sessions.get((panel_url, api_key, server_id))
+        session = self._sessions.get(server_id)
         if session is None:
             return {"server_id": server_id, "pinned": False, "closed": False}
         session.pinned = False
         return {"server_id": server_id, "pinned": False, "closed": False}
 
     def list_sessions(self) -> list[SessionInfo]:
-        """List sessions visible to the current request's credentials.
-
-        Each operator key only sees its own sessions — never another operator's
-        — even on the same panel.
-        """
-        try:
-            panel_url, api_key = self._current_creds()
-        except MissingCredentialsError:
-            return []
         now = time.monotonic()
         return [
             SessionInfo(
@@ -357,64 +321,52 @@ class ConsoleHub:
                 subscribers=s.subscriber_count,
                 last_access_ago_sec=int(now - s.last_access),
             )
-            for (p, k, _), s in self._sessions.items()
-            if p == panel_url and k == api_key
+            for s in self._sessions.values()
         ]
 
     # ─────────────────────────────── internals ───────────────────────────────
 
     async def _ensure_session(self, server_id: str) -> _Session:
-        panel_url, api_key = self._current_creds()
-        key: SessionKey = (panel_url, api_key, server_id)
         async with self._sessions_lock:
-            session = self._sessions.get(key)
+            session = self._sessions.get(server_id)
             if session is not None:
                 return session
 
             session = _Session(
                 server_id=server_id,
-                panel_url=panel_url,
-                api_key=api_key,
                 buffer=deque(maxlen=self._settings.console_buffer_size),
             )
-            self._sessions[key] = session
+            self._sessions[server_id] = session
             session.runner_task = asyncio.create_task(
                 self._run_session(session), name=f"console-{server_id}"
             )
             return session
 
     async def _run_session(self, session: _Session) -> None:
-        """Connect/reconnect loop with exponential backoff.
-
-        Wraps the body in ``use_credentials`` so all client calls in the
-        background task chain (``get_websocket_credentials``, refresh) target
-        the right panel + key without needing a live request task on the stack.
-        """
+        """Connect/reconnect loop with exponential backoff."""
 
         attempt = 0
-        with use_credentials(session.panel_url, session.api_key):
-            while not session.closed:
-                try:
-                    await self._connect_and_pump(session)
-                    attempt = 0  # reset after a clean disconnect
-                except Exception as exc:
-                    log.warning(
-                        "console_session_disconnect",
-                        server_id=session.server_id,
-                        panel_url=session.panel_url,
-                        error=str(exc),
-                        error_type=type(exc).__name__,
-                    )
+        while not session.closed:
+            try:
+                await self._connect_and_pump(session)
+                attempt = 0  # reset after a clean disconnect
+            except Exception as exc:
+                log.warning(
+                    "console_session_disconnect",
+                    server_id=session.server_id,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
 
-                if session.closed:
-                    return
+            if session.closed:
+                return
 
-                attempt += 1
-                delay = min(30.0, 1.0 * (2 ** min(5, attempt - 1)))
-                try:
-                    await asyncio.sleep(delay)
-                except asyncio.CancelledError:
-                    return
+            attempt += 1
+            delay = min(30.0, 1.0 * (2 ** min(5, attempt - 1)))
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
 
     async def _connect_and_pump(self, session: _Session) -> None:
         creds = await self._client.get_websocket_credentials(session.server_id)
@@ -422,7 +374,7 @@ class ConsoleHub:
         # Wings checks the Origin header against the panel URL.
         async with websockets.connect(
             creds.socket,
-            origin=session.panel_url,
+            origin=self._client.panel_url,
             ping_interval=20,
             ping_timeout=20,
             max_size=2**20,
@@ -621,7 +573,7 @@ class ConsoleHub:
     def _reap_idle(self) -> None:
         now = time.monotonic()
         idle_threshold_s = self._settings.console_idle_ttl
-        to_close: list[tuple[SessionKey, _Session]] = []
+        to_close: list[tuple[str, _Session]] = []
         for key, session in list(self._sessions.items()):
             if session.pinned or session.subscriber_count > 0:
                 continue
