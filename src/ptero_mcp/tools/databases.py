@@ -8,13 +8,20 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
-from ptero_mcp.tools._common import map_panel_errors, ok
+from ptero_mcp.tools._common import (
+    DESTRUCTIVE,
+    READ_ONLY,
+    WRITE,
+    map_panel_errors,
+    ok,
+)
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="list_databases",
         description="List databases with name, host, port, and password.",
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def list_databases(
@@ -25,6 +32,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="create_database",
         description="Create a new database. Requires available slots (see get_server feature_limits).",
+        annotations=WRITE,
     )
     @map_panel_errors
     async def create_database(
@@ -52,6 +60,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="rotate_database_password",
         description="Generate a new random password for a database. The new password is returned in the response.",
+        annotations=WRITE,
     )
     @map_panel_errors
     async def rotate_database_password(
@@ -65,6 +74,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="delete_database",
         description="Delete a database. DESTRUCTIVE — the data is gone.",
+        annotations=DESTRUCTIVE,
     )
     @map_panel_errors
     async def delete_database(

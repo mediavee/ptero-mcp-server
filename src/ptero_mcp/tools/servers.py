@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
-from ptero_mcp.tools._common import map_panel_errors
+from ptero_mcp.tools._common import READ_ONLY, map_panel_errors
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -17,6 +17,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         description=(
             "List all servers with identifier, name, node, status, and limits. Paginated."
         ),
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def list_servers(
@@ -32,6 +33,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         description=(
             "Get full server details: limits, feature limits, startup, docker image, status."
         ),
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def get_server(
@@ -51,6 +53,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         description=(
             "Get current resource utilization: state, memory, CPU, disk, network, uptime."
         ),
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def get_resources(

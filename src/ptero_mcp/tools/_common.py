@@ -46,3 +46,36 @@ def map_panel_errors[**P, R](
 def ok(**fields: Any) -> dict[str, Any]:
     """Tiny helper to build the standard ``{ok: true, ...}`` payload."""
     return {"ok": True, **fields}
+
+
+# ──────────────────────────── tool annotation presets ──────────────────────────
+#
+# MCP tool annotations — see https://modelcontextprotocol.io/specification.
+# Hints clients (Claude Code/Desktop) on safety so they can colour tools, prompt
+# before destructive ops, and skip confirmations on read-only ones. All our
+# tools talk to the panel API, hence ``openWorldHint=True`` everywhere.
+
+READ_ONLY: dict[str, Any] = {
+    "readOnlyHint": True,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
+IDEMPOTENT: dict[str, Any] = {
+    "readOnlyHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
+DESTRUCTIVE: dict[str, Any] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
+WRITE: dict[str, Any] = {
+    "readOnlyHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}

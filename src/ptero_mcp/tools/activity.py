@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
-from ptero_mcp.tools._common import map_panel_errors
+from ptero_mcp.tools._common import READ_ONLY, map_panel_errors
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -18,6 +18,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "Read panel audit log (power, commands, backups, file edits). Filter by event "
             "prefix. Includes acting user when available."
         ),
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def get_activity_log(

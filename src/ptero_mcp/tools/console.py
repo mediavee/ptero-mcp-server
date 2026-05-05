@@ -18,7 +18,13 @@ from ptero_mcp.console_hub import (
     WaitOptions,
 )
 from ptero_mcp.context import ToolContext
-from ptero_mcp.tools._common import map_panel_errors, ok
+from ptero_mcp.tools._common import (
+    IDEMPOTENT,
+    READ_ONLY,
+    WRITE,
+    map_panel_errors,
+    ok,
+)
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -28,6 +34,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "Fire-and-forget console command. Server must be running. "
             "Prefer run_command when you need the output."
         ),
+        annotations=WRITE,
     )
     async def send_command(
         server_id: Annotated[str, Field(description="Server identifier")],
@@ -58,6 +65,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "Send command and capture output atomically. Use `expect` regex to short-circuit "
             "on match. Returns only lines produced during the capture window."
         ),
+        annotations=WRITE,
     )
     async def run_command(
         server_id: Annotated[str, Field(description="Server identifier")],
@@ -105,6 +113,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "Read recent lines from the console ring buffer. Use `match` for regex filtering. "
             "First call opens a persistent WS; idle sessions are reaped after ~10 min."
         ),
+        annotations=READ_ONLY,
     )
     async def tail_console(
         server_id: Annotated[str, Field(description="Server identifier")],
@@ -149,6 +158,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "Block until new output arrives, `wait_ms` elapses, or `expect` regex matches. "
             "Use `since_ms` to include buffered history. Prefer over polling tail_console."
         ),
+        annotations=READ_ONLY,
     )
     async def wait_console(
         server_id: Annotated[str, Field(description="Server identifier")],
@@ -192,6 +202,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="watch_server",
         description="Pin a console session to prevent idle reaping. Call unwatch_server to release.",
+        annotations=IDEMPOTENT,
     )
     @map_panel_errors
     async def watch_server(
@@ -202,6 +213,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="unwatch_server",
         description="Remove pin from watch_server. Session reaped after normal idle TTL.",
+        annotations=IDEMPOTENT,
     )
     async def unwatch_server(
         server_id: Annotated[str, Field(description="Server identifier")],
@@ -211,6 +223,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="list_console_sessions",
         description="List active console sessions with state, buffer size, and pin status.",
+        annotations=READ_ONLY,
     )
     async def list_console_sessions() -> dict[str, Any]:
         return {"sessions": [asdict(s) for s in ctx.console_hub.list_sessions()]}

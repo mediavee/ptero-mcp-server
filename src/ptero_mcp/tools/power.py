@@ -10,7 +10,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
-from ptero_mcp.tools._common import map_panel_errors, ok
+from ptero_mcp.tools._common import DESTRUCTIVE, map_panel_errors, ok
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
@@ -18,8 +18,10 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         name="power_action",
         description=(
             "Send power signal (start/stop/restart/kill). Async — returns `sent_at_ms` "
-            "for use with wait_console `since_ms`."
+            "for use with wait_console `since_ms`. The 'kill' signal sends SIGKILL "
+            "and risks data loss on unsaved state."
         ),
+        annotations=DESTRUCTIVE,
     )
     @map_panel_errors
     async def power_action(

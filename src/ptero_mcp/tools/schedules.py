@@ -9,7 +9,14 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
-from ptero_mcp.tools._common import map_panel_errors, ok
+from ptero_mcp.tools._common import (
+    DESTRUCTIVE,
+    IDEMPOTENT,
+    READ_ONLY,
+    WRITE,
+    map_panel_errors,
+    ok,
+)
 
 CronField = Annotated[
     str, Field(description="Cron field value, e.g. '*', '*/5', '0', '1,15'")
@@ -22,6 +29,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="list_schedules",
         description="List all schedules with their tasks.",
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def list_schedules(
@@ -32,6 +40,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="get_schedule",
         description="Get details of a single schedule by id, including its tasks.",
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def get_schedule(
@@ -43,6 +52,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="create_schedule",
         description="Create a cron schedule. Add tasks via create_schedule_task after creation.",
+        annotations=WRITE,
     )
     @map_panel_errors
     async def create_schedule(
@@ -74,6 +84,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="update_schedule",
         description="Update an existing schedule. All fields are required (panel uses POST as full replace).",
+        annotations=IDEMPOTENT,
     )
     @map_panel_errors
     async def update_schedule(
@@ -104,6 +115,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="delete_schedule",
         description="Delete a schedule and all its tasks.",
+        annotations=DESTRUCTIVE,
     )
     @map_panel_errors
     async def delete_schedule(
@@ -116,6 +128,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="execute_schedule",
         description="Execute a schedule immediately, ignoring cron and active flag.",
+        annotations=WRITE,
     )
     @map_panel_errors
     async def execute_schedule(
@@ -135,6 +148,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "Add a task to a schedule. Types: command (console), power "
             "(start/stop/restart/kill), backup. Sequential execution with time_offset delay."
         ),
+        annotations=WRITE,
     )
     @map_panel_errors
     async def create_schedule_task(
@@ -174,6 +188,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="update_schedule_task",
         description="Update an existing task on a schedule. All fields are required.",
+        annotations=IDEMPOTENT,
     )
     @map_panel_errors
     async def update_schedule_task(
@@ -200,6 +215,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="delete_schedule_task",
         description="Delete a task from a schedule.",
+        annotations=DESTRUCTIVE,
     )
     @map_panel_errors
     async def delete_schedule_task(

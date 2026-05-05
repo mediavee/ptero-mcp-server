@@ -9,13 +9,20 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
-from ptero_mcp.tools._common import map_panel_errors, ok
+from ptero_mcp.tools._common import (
+    DESTRUCTIVE,
+    READ_ONLY,
+    WRITE,
+    map_panel_errors,
+    ok,
+)
 
 
 def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="list_backups",
         description="List backups with uuid, name, size, status, and lock state. Paginated.",
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def list_backups(
@@ -28,6 +35,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="get_backup",
         description="Get details of a single backup by its uuid.",
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def get_backup(
@@ -39,6 +47,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="create_backup",
         description="Create a backup (async). Poll get_backup for completion.",
+        annotations=WRITE,
     )
     @map_panel_errors
     async def create_backup(
@@ -67,6 +76,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="delete_backup",
         description="Delete a backup. Fails if the backup is locked — call `toggle_backup_lock` first.",
+        annotations=DESTRUCTIVE,
     )
     @map_panel_errors
     async def delete_backup(
@@ -79,6 +89,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="toggle_backup_lock",
         description="Toggle the lock state of a backup. Locked backups cannot be deleted.",
+        annotations=WRITE,
     )
     @map_panel_errors
     async def toggle_backup_lock(
@@ -90,6 +101,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="restore_backup",
         description="Restore backup over server files. DESTRUCTIVE if truncate=true (wipes first).",
+        annotations=DESTRUCTIVE,
     )
     @map_panel_errors
     async def restore_backup(
@@ -111,6 +123,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="get_backup_download_url",
         description="Get a signed, time-limited download URL for a backup.",
+        annotations=READ_ONLY,
     )
     @map_panel_errors
     async def get_backup_download_url(
