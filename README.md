@@ -152,6 +152,10 @@ Thirty MCP tools grouped into seven categories. See [`SKILL.md`](./SKILL.md) for
 
 `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `execute_schedule`, `create_schedule_task`, `update_schedule_task`, `delete_schedule_task`
 
+### Field selection
+
+The Pterodactyl JSON:API does not support server-side field selection, so read tools return the full upstream payload. Client-side filtering is intentionally not implemented — the upstream wire cost is unchanged, and most callers genuinely use the full server descriptor (limits, container, status). If a specific tool's payload becomes a problem in practice, narrow it at the call site.
+
 ## Console architecture
 
 The console subsystem is what makes this server worth its own repo.
