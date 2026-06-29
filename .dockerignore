@@ -1,9 +1,11 @@
-__pycache__
-*.py[cod]
-.venv
-.env
 .git
 .gitignore
+.github
+.env
+.env.local
+.venv
+__pycache__
+*.py[cod]
 .ruff_cache
 .mypy_cache
 .pytest_cache

@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.12-slim AS build
+FROM python:3.13-slim AS build
 
 # uv: fast deterministic dependency resolution and venv management.
-COPY --from=ghcr.io/astral-sh/uv:0.5.7 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.20 /uv /usr/local/bin/uv
 
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
@@ -17,10 +17,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Install the project itself.
 COPY src ./src
+COPY README.md LICENSE ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" \
