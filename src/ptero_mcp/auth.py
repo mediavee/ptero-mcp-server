@@ -9,7 +9,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 
-def bearer_auth(expected_token: str) -> Callable[
+def bearer_auth(
+    expected_token: str,
+) -> Callable[
     [Request, Callable[[Request], Awaitable[Response]]],
     Awaitable[Response],
 ]:

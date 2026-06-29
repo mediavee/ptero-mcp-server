@@ -13,12 +13,13 @@ import json
 import re
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
 import websockets
 from websockets.asyncio.client import ClientConnection
+from websockets.typing import Origin
 
 from ptero_mcp.client import (
     MissingCredentialsError,
@@ -168,7 +169,7 @@ class ConsoleHub:
         self._close_tasks: set[asyncio.Task[None]] = set()
 
     @staticmethod
-    def _spawn(session: _Session, coro: Awaitable[Any]) -> asyncio.Task[Any]:
+    def _spawn(session: _Session, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
         """Schedule a fire-and-forget task and keep a strong ref on the session.
 
         Without this set, ``asyncio.create_task`` results would be only weakly
@@ -422,7 +423,7 @@ class ConsoleHub:
         # Wings checks the Origin header against the panel URL.
         async with websockets.connect(
             creds.socket,
-            origin=session.panel_url,
+            origin=Origin(session.panel_url),
             ping_interval=20,
             ping_timeout=20,
             max_size=2**20,
@@ -482,12 +483,8 @@ class ConsoleHub:
             # Pull recent history and a stats snapshot.
             ws = session.ws
             if ws is not None:
-                self._spawn(
-                    session, ws.send(json.dumps({"event": "send logs", "args": []}))
-                )
-                self._spawn(
-                    session, ws.send(json.dumps({"event": "send stats", "args": []}))
-                )
+                self._spawn(session, ws.send(json.dumps({"event": "send logs", "args": []})))
+                self._spawn(session, ws.send(json.dumps({"event": "send stats", "args": []})))
             session.ready.set()
 
         elif event in ("console output", "install output"):
@@ -518,7 +515,7 @@ class ConsoleHub:
             log.error(
                 "wings_event_error",
                 server_id=session.server_id,
-                event=event,
+                wings_event=event,
                 args=args,
             )
 

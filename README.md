@@ -2,7 +2,7 @@
 
 An [MCP](https://modelcontextprotocol.io) server that lets AI assistants operate game servers managed by a [Pterodactyl](https://pterodactyl.io) panel. Power actions, live console, commands, backups, schedules, activity log — with a persistent rolling buffer so "what just happened on the server" is always one tool call away.
 
-Built on **[FastMCP 3.x](https://gofastmcp.com)** + Python 3.12 + asyncio. The architecture is intentionally portable: the same skeleton (settings → client → tool registration → custom routes) can host any other Pterodactyl-style integration with minimal churn.
+Built on **[FastMCP 3.x](https://gofastmcp.com)** + Python 3.13 + asyncio. The architecture is intentionally portable: the same skeleton (settings → client → tool registration → custom routes) can host any other Pterodactyl-style integration with minimal churn.
 
 ---
 
@@ -34,7 +34,7 @@ The full Pterodactyl client API surface — power, backups, databases, schedules
 ### 1. Prerequisites
 
 - One or more Pterodactyl panels with a Client API key per operator (`Account → API Credentials`)
-- Python **3.12+** **or** Docker
+- Python **3.13+** **or** Docker
 - (Dev) [`uv`](https://github.com/astral-sh/uv) for dependency management
 
 ### 2. Configure environment
@@ -104,7 +104,7 @@ A single `ptero-mcp` instance serves any number of Pterodactyl panels and any nu
 
 ## Tools
 
-Thirty MCP tools grouped into seven categories. See [`SKILL.md`](./SKILL.md) for composition patterns and methodology.
+Thirty-two MCP tools grouped into seven categories. See [`SKILL.md`](./SKILL.md) for composition patterns and methodology.
 
 ### Discovery & state
 
@@ -210,6 +210,7 @@ uv run ptero-mcp                 # run the server
 uv run python -m ptero_mcp       # equivalent
 uv run ruff check src            # lint
 uv run ruff format src           # format
+uv run mypy src                  # type-check (strict)
 ```
 
 The codebase is small, async-first, and flat:
@@ -256,4 +257,4 @@ Everything else — auth middleware, FastMCP lifespan, structured logging, Docke
 
 ## License
 
-Private. © Mediavee.
+[MIT](./LICENSE) © Mediavee.

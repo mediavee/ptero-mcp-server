@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Iterator
 from contextvars import ContextVar
 from typing import Any, Literal
 
@@ -38,7 +39,7 @@ class MissingCredentialsError(RuntimeError):
 
 
 @contextlib.contextmanager
-def use_credentials(panel_url: str, api_key: str):
+def use_credentials(panel_url: str, api_key: str) -> Iterator[None]:
     """Set both contextvars for the body of the ``with`` block.
 
     Used by the console hub's background tasks (run loop, refresh loop) to
@@ -285,9 +286,7 @@ class PterodactylClient:
         await self._request("DELETE", f"/servers/{server_id}/backups/{backup_uuid}")
 
     async def toggle_backup_lock(self, server_id: str, backup_uuid: str) -> Any:
-        return await self._request(
-            "POST", f"/servers/{server_id}/backups/{backup_uuid}/lock"
-        )
+        return await self._request("POST", f"/servers/{server_id}/backups/{backup_uuid}/lock")
 
     async def restore_backup(
         self, server_id: str, backup_uuid: str, truncate: bool = False
@@ -299,9 +298,7 @@ class PterodactylClient:
         )
 
     async def get_backup_download_url(self, server_id: str, backup_uuid: str) -> Any:
-        return await self._request(
-            "GET", f"/servers/{server_id}/backups/{backup_uuid}/download"
-        )
+        return await self._request("GET", f"/servers/{server_id}/backups/{backup_uuid}/download")
 
     # ─────────────────────────────── databases ─────────────────────────────
 
@@ -443,9 +440,7 @@ class PterodactylClient:
             },
         )
 
-    async def delete_schedule_task(
-        self, server_id: str, schedule_id: int, task_id: int
-    ) -> None:
+    async def delete_schedule_task(self, server_id: str, schedule_id: int, task_id: int) -> None:
         await self._request(
             "DELETE", f"/servers/{server_id}/schedules/{schedule_id}/tasks/{task_id}"
         )

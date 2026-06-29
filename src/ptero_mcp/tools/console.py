@@ -75,9 +75,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ],
         wait_ms: Annotated[
             int | None,
-            Field(
-                ge=0, le=30_000, description="Output collection time in ms. Default 1500."
-            ),
+            Field(ge=0, le=30_000, description="Output collection time in ms. Default 1500."),
         ] = None,
         expect: Annotated[
             str | None,

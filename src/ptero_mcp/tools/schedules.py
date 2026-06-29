@@ -18,9 +18,7 @@ from ptero_mcp.tools._common import (
     ok,
 )
 
-CronField = Annotated[
-    str, Field(description="Cron field value, e.g. '*', '*/5', '0', '1,15'")
-]
+CronField = Annotated[str, Field(description="Cron field value, e.g. '*', '*/5', '0', '1,15'")]
 ScheduleId = Annotated[int, Field(ge=1)]
 TaskId = Annotated[int, Field(ge=1)]
 
@@ -161,9 +159,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         payload: Annotated[
             str | None,
             Field(
-                description=(
-                    "Required for command/power; optional for backup (ignored files list)"
-                )
+                description=("Required for command/power; optional for backup (ignored files list)")
             ),
         ] = None,
         sequence_id: Annotated[
