@@ -1,6 +1,6 @@
 [project]
 name = "ptero-mcp-server"
-version = "0.2.0"
+version = "0.1.0"
 description = "MCP server exposing Pterodactyl panel operations and live console buffering"
 readme = "README.md"
 requires-python = ">=3.13"
