@@ -251,6 +251,7 @@ Everything else — auth middleware, FastMCP lifespan, structured logging, Docke
 
 ## Deployment notes
 
+- **Published image.** Cutting a release (`git tag v1.2.3 && git push --tags`) builds and pushes `ghcr.io/mediavee/ptero-mcp-server:1.2.3` + `:latest` to GHCR. To run from the registry instead of building, uncomment the `image:` line in `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
 - **Security.** Panel URLs and Client API keys travel in headers (`X-Pterodactyl-Url`, `X-Pterodactyl-Key`). The server does not log them and does not persist them. **TLS in front is non-negotiable** unless the listener is bound to loopback or a private network (Tailscale, WireGuard). `MCP_AUTH_TOKEN` gates access at the bearer layer. `.env` is in `.gitignore` — keep it that way.
 - **Multi-panel, multi-operator.** A single process handles any number of panels and any number of operator keys concurrently. Console sessions are keyed by `(panel_url, api_key, server_id)` for strict isolation — different keys never share a buffer, even on the same panel. Sessions are reaped after `CONSOLE_IDLE_TTL` seconds of inactivity unless pinned (`watch_server`).
 - **Graceful shutdown.** `SIGTERM` / `SIGINT` closes all sessions and transports, then exits. Uvicorn's 10-second graceful-shutdown timeout forces exit if anything hangs.

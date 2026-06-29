@@ -1,6 +1,8 @@
 services:
   ptero-mcp:
     build: .
+    # Or pull the published image instead of building:
+    # image: ghcr.io/mediavee/ptero-mcp-server:latest
     container_name: ptero-mcp
     restart: unless-stopped
     env_file: .env
