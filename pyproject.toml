@@ -18,6 +18,10 @@ dependencies = [
     "starlette>=0.41.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/mediavee/ptero-mcp-server"
+Issues = "https://github.com/mediavee/ptero-mcp-server/issues"
+
 [project.scripts]
 ptero-mcp = "ptero_mcp.__main__:main"
 
