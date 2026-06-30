@@ -2,7 +2,7 @@
 
 Sessions are lazy: created on the first call referencing a server, kept alive
 while accessed, and reaped after the configured idle TTL unless pinned via
-``watch()`` or holding active ``subscribe()`` listeners.
+``watch()``.
 """
 
 from __future__ import annotations
@@ -106,18 +106,11 @@ class WaitResult:
 
 
 @dataclass(slots=True)
-class SubscribeResult:
-    historical_lines: list[ConsoleLine]
-    unsubscribe: Callable[[], None]
-
-
-@dataclass(slots=True)
 class SessionInfo:
     server_id: str
     pinned: bool
     state: str | None
     buffered_lines: int
-    subscribers: int
     last_access_ago_sec: int
 
 
@@ -140,10 +133,8 @@ class _Session:
     last_access: float = field(default_factory=time.monotonic)
     pinned: bool = False
     server_state: str | None = None
-    last_stats: Any = None
     closed: bool = False
     line_listeners: set[LineListener] = field(default_factory=set)
-    subscriber_count: int = 0
     ws: ClientConnection | None = None
     runner_task: asyncio.Task[None] | None = None
     refresh_task: asyncio.Task[None] | None = None
@@ -282,45 +273,6 @@ class ConsoleHub:
             lines=[*historical, *capture.lines],
         )
 
-    async def subscribe(
-        self,
-        server_id: str,
-        listener: LineListener,
-        *,
-        history_since_ms: int | None = None,
-        ready_timeout_ms: int = 10_000,
-    ) -> SubscribeResult:
-        """Register a long-lived listener and snapshot history atomically.
-
-        While at least one subscriber is active, the session is exempt from the
-        idle reaper. The caller must invoke ``unsubscribe`` when done.
-        """
-
-        session = await self._ensure_session(server_id)
-        session.last_access = time.monotonic()
-        await asyncio.wait_for(session.ready.wait(), timeout=ready_timeout_ms / 1000)
-
-        if history_since_ms is not None:
-            historical = [ln for ln in session.buffer if ln.ts >= history_since_ms]
-        else:
-            historical = []
-
-        session.line_listeners.add(listener)
-        session.subscriber_count += 1
-
-        unsubscribed = False
-
-        def unsubscribe() -> None:
-            nonlocal unsubscribed
-            if unsubscribed:
-                return
-            unsubscribed = True
-            session.line_listeners.discard(listener)
-            session.subscriber_count = max(0, session.subscriber_count - 1)
-            session.last_access = time.monotonic()
-
-        return SubscribeResult(historical_lines=historical, unsubscribe=unsubscribe)
-
     async def watch(self, server_id: str) -> dict[str, Any]:
         session = await self._ensure_session(server_id)
         session.pinned = True
@@ -331,12 +283,11 @@ class ConsoleHub:
         try:
             panel_url, api_key = self._current_creds()
         except MissingCredentialsError:
-            return {"server_id": server_id, "pinned": False, "closed": False}
+            return {"server_id": server_id, "pinned": False}
         session = self._sessions.get((panel_url, api_key, server_id))
-        if session is None:
-            return {"server_id": server_id, "pinned": False, "closed": False}
-        session.pinned = False
-        return {"server_id": server_id, "pinned": False, "closed": False}
+        if session is not None:
+            session.pinned = False
+        return {"server_id": server_id, "pinned": False}
 
     def list_sessions(self) -> list[SessionInfo]:
         """List sessions visible to the current request's credentials.
@@ -355,7 +306,6 @@ class ConsoleHub:
                 pinned=s.pinned,
                 state=s.server_state,
                 buffered_lines=len(s.buffer),
-                subscribers=s.subscriber_count,
                 last_access_ago_sec=int(now - s.last_access),
             )
             for (p, k, _), s in self._sessions.items()
@@ -480,11 +430,10 @@ class ConsoleHub:
         args: list[Any] = msg.get("args") or []
 
         if event == "auth success":
-            # Pull recent history and a stats snapshot.
+            # Replay recent console history into the buffer.
             ws = session.ws
             if ws is not None:
                 self._spawn(session, ws.send(json.dumps({"event": "send logs", "args": []})))
-                self._spawn(session, ws.send(json.dumps({"event": "send stats", "args": []})))
             session.ready.set()
 
         elif event in ("console output", "install output"):
@@ -501,12 +450,6 @@ class ConsoleHub:
 
         elif event == "status":
             session.server_state = args[0] if args else None
-
-        elif event == "stats":
-            payload = args[0] if args else None
-            if isinstance(payload, str):
-                with contextlib.suppress(json.JSONDecodeError):
-                    session.last_stats = json.loads(payload)
 
         elif event in ("token expiring", "token expired"):
             self._spawn(session, self._refresh_now(session))
@@ -620,7 +563,7 @@ class ConsoleHub:
         idle_threshold_s = self._settings.console_idle_ttl
         to_close: list[tuple[SessionKey, _Session]] = []
         for key, session in list(self._sessions.items()):
-            if session.pinned or session.subscriber_count > 0:
+            if session.pinned:
                 continue
             if (now - session.last_access) >= idle_threshold_s:
                 to_close.append((key, session))

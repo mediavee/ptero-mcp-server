@@ -104,7 +104,7 @@ Grouped by domain. See [`SKILL.md`](./SKILL.md) for composition patterns and met
 | `run_command` | Atomically send a command **and** capture its reply window |
 | `send_command` | Fire-and-forget command injection; returns `sent_at_ms` |
 | `watch_server` / `unwatch_server` | Pin / unpin a session against the idle TTL |
-| `list_console_sessions` | Sessions held by the current credentials and their subscriber counts |
+| `list_console_sessions` | Console sessions held by the current credentials |
 
 ### Audit
 
