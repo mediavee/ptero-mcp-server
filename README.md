@@ -159,6 +159,16 @@ uv run mypy src                  # type-check (strict)
 
 - **Published image.** Tagging a release (`git tag v1.2.3 && git push --tags`) builds and pushes `ghcr.io/mediavee/ptero-mcp-server:1.2.3` + `:latest`. To run from the registry, uncomment the `image:` line in `docker-compose.yml`, then `docker compose pull && docker compose up -d`.
 - **Security.** Credentials travel in headers; never logged or persisted. TLS in front is mandatory unless bound to loopback / Tailscale / WireGuard. `MCP_AUTH_TOKEN` gates access. Keep `.env` git-ignored.
+- **Panel on the same host.** When a panel resolves to the Docker host's own private
+  address (Tailscale, WireGuard), a bridged container cannot reach it: the server
+  answers panels that live elsewhere and times out on that one. Run with
+  `network_mode: host` and bind `HTTP_HOST` to the private address.
+- **Health check.** Probe the address the server actually binds. With `HTTP_HOST` set to
+  a private address, a `127.0.0.1` probe reports the container unhealthy while it serves
+  every request normally.
+- **Pin the image name when building.** Compose derives the image tag from the directory
+  name, so renaming the deployment directory silently reuses whatever image already
+  carries the new derived name. Set an explicit `image:` alongside `build:`.
 - **Graceful shutdown.** `SIGTERM` / `SIGINT` closes all sessions and transports, then exits (10s uvicorn cap).
 
 ## License
