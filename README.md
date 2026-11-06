@@ -100,9 +100,9 @@ Grouped by domain. See [`SKILL.md`](./SKILL.md) for composition patterns and met
 | Tool | Description |
 |---|---|
 | `tail_console` | Read the rolling buffer (past lines), filterable by `limit` / `since_ms` / `match` |
-| `wait_console` | Block until new lines arrive; short-circuit on an `expect` regex |
-| `run_command` | Atomically send a command **and** capture its reply window |
-| `send_command` | Fire-and-forget command injection; returns `sent_at_ms` |
+| `wait_console` | Block until new lines arrive; short-circuit on an `expect` regex. `matched` and `warning` follow the `run_command` rules |
+| `run_command` | Atomically send a command **and** capture its reply window. `matched` appears only when `expect` was given; an `expect` not seen adds a `warning` with the wait and line counts |
+| `send_command` | Fire-and-forget command injection; returns `sent_at_ms` and a `note`: `ok` is a send receipt, not the command's effect |
 | `watch_server` / `unwatch_server` | Pin / unpin a session against the idle TTL |
 | `list_console_sessions` | Console sessions held by the current credentials |
 
@@ -128,6 +128,8 @@ Grouped by domain. See [`SKILL.md`](./SKILL.md) for composition patterns and met
 
 Read tools return the full upstream payload — Pterodactyl's JSON:API has no server-side field selection, and most callers use the full descriptor. Narrow at the call site if a specific payload becomes a problem.
 
+Every tool result is a JSON object carrying `panel` (see `PANEL_LABEL`). A tool whose payload is not an object (a list, or nothing) comes back as `{"panel": …, "result": …}`.
+
 ## Configuration
 
 | Variable | Required | Default | Description |
@@ -137,6 +139,7 @@ Read tools return the full upstream payload — Pterodactyl's JSON:API has no se
 | `HTTP_PORT` | no | `3000` | Bind port |
 | `CONSOLE_BUFFER_SIZE` | no | `5000` | Rolling buffer size per session. Bump on chatty servers |
 | `CONSOLE_IDLE_TTL` | no | `600` | Seconds of inactivity before an unpinned session is closed |
+| `PANEL_LABEL` | no | panel host | Name of the panel this instance acts on (`prod`, `dev`, ...). Echoed as `panel` in every tool result and as a `[panel …]` prefix on tool errors, so an assistant wired to several instances cannot mistake one for another. Set it only when the instance serves a single panel |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `LOG_JSON` | no | `false` | Emit logs as JSON (recommended in production) |
 
@@ -151,8 +154,9 @@ Panel URL and Client API key are supplied per request via the `X-Pterodactyl-Url
 ```bash
 uv sync
 uv run ptero-mcp                 # run the server
-uv run ruff check src            # lint
-uv run mypy src                  # type-check (strict)
+uv run ruff check src tests      # lint
+uv run mypy src tests            # type-check (strict)
+uv run pytest                    # tool-boundary tests (panel client faked, no network)
 ```
 
 ## Deployment notes

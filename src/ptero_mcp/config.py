@@ -36,6 +36,12 @@ class Settings(BaseSettings):
         600, ge=10, description="Idle TTL in seconds before a console session is reaped."
     )
 
+    panel_label: str | None = Field(
+        None,
+        description="Name for the panel this instance acts on (e.g. prod, dev), echoed in every "
+        "tool result. Unset: the panel host.",
+    )
+
     log_level: str = Field("INFO", description="Logger level (DEBUG, INFO, WARNING, ERROR).")
     log_json: bool = Field(False, description="Emit logs as JSON.")
 

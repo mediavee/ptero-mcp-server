@@ -76,7 +76,7 @@ If `tail_console` returns an empty buffer or warning ("timed out"), the server m
 1. (Optional) `tail_console` with a small `limit` to make sure it's not in the middle of something (active backup, players doing important stuff).
 2. `power_action(server_id=X, signal="restart")` — returns `sent_at_ms`, keep it.
 3. `wait_console(server_id=X, wait_ms=60000, expect="Done \\(\\d", since_ms=<sent_at_ms>)` — blocks until the server logs its boot-complete line or until 60s. Passing `since_ms` bridges the tiny gap so no output is missed.
-4. Report state from the captured lines: `matched=true` → the server is back; `matched=false` with some lines → still booting, tell the user; empty `lines` → something is very wrong, check `get_resources` and `get_activity_log`.
+4. Report state from the captured lines: `matched=true` → the server is back; `matched=false` (its `warning` gives the counts) with some lines → still booting, tell the user; empty `lines` → something is very wrong, check `get_resources` and `get_activity_log`.
 
 ### When asked "send /command to X"
 
@@ -85,8 +85,10 @@ If `tail_console` returns an empty buffer or warning ("timed out"), the server m
 - `run_command(server_id=X, command="list", expect="players online", wait_ms=1500)`
 - Pick an `expect` regex distinctive to the reply you want — it short-circuits as soon as it matches.
 - Bump `wait_ms` for slow commands (`forceload add`, `worldborder set`, heavy plugin queries).
-- `matched=true` means the regex hit and the wait was cut short. `matched=false` with some lines means the regex didn't hit but output arrived — read it anyway.
+- `matched` exists only when you passed `expect`: `true` means the regex hit and the wait was cut short; `false` (with a `warning` giving the wait and line counts) means it didn't hit — read the lines anyway.
 - **Empty `lines` is normal** for commands that log nothing (`say`, `tellraw`, many plugin commands). Not a bug.
+
+`send_command`'s `ok:true` only means the panel accepted the command, not that it worked. Every result carries `panel`: check it names the panel you meant (prod vs dev).
 
 **Fallback `send_command` + later `tail_console`** only when the response arrives over many seconds (e.g. `profile` dump). Use the returned `sent_at_ms` as `since_ms` to filter.
 

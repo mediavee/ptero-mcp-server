@@ -84,8 +84,10 @@ class RunCommandResult:
     command: str
     sent_at_ms: int
     elapsed_ms: int
-    matched: bool
+    matched: bool | None
+    """``None`` when no ``expect`` was given: there was nothing to match."""
     lines: list[ConsoleLine]
+    warning: str | None = None
 
 
 @dataclass(slots=True)
@@ -100,9 +102,11 @@ class WaitOptions:
 class WaitResult:
     server_id: str
     state: str | None
-    matched: bool
+    matched: bool | None
+    """``None`` when no ``expect`` was given: there was nothing to match."""
     waited_ms: int
     lines: list[ConsoleLine]
+    warning: str | None = None
 
 
 @dataclass(slots=True)
@@ -121,6 +125,14 @@ def _compile_regex(pattern: str | None, label: str) -> re.Pattern[str] | None:
         return re.compile(pattern)
     except re.error as exc:
         raise ValueError(f'Invalid {label} regex "{pattern}": {exc}') from exc
+
+
+def _expect_miss(
+    expect_re: re.Pattern[str] | None, matched: bool, waited_ms: int, lines: list[ConsoleLine]
+) -> str | None:
+    if expect_re is None or matched:
+        return None
+    return f"expect not seen within {waited_ms} ms; {len(lines)} lines captured"
 
 
 @dataclass(slots=True)
@@ -238,8 +250,9 @@ class ConsoleHub:
             command=command,
             sent_at_ms=sent_at_ms,
             elapsed_ms=_now_ms() - sent_at_ms,
-            matched=capture.matched,
+            matched=None if expect_re is None else capture.matched,
             lines=capture.lines,
+            warning=_expect_miss(expect_re, capture.matched, capture.waited_ms, capture.lines),
         )
 
     async def wait_for_output(self, server_id: str, options: WaitOptions) -> WaitResult:
@@ -265,12 +278,14 @@ class ConsoleHub:
 
         capture = await self._capture_with_listener(session, options.wait_ms, expect_re)
 
+        lines = [*historical, *capture.lines]
         return WaitResult(
             server_id=server_id,
             state=session.server_state,
-            matched=capture.matched,
+            matched=None if expect_re is None else capture.matched,
             waited_ms=capture.waited_ms,
-            lines=[*historical, *capture.lines],
+            lines=lines,
+            warning=_expect_miss(expect_re, capture.matched, capture.waited_ms, lines),
         )
 
     async def watch(self, server_id: str) -> dict[str, Any]:
