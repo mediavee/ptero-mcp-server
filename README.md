@@ -154,8 +154,8 @@ Panel URL and Client API key are supplied per request via the `X-Pterodactyl-Url
 ```bash
 uv sync
 uv run ptero-mcp                 # run the server
-uv run ruff check src            # lint
-uv run mypy src                  # type-check (strict)
+uv run ruff check src tests      # lint
+uv run mypy src tests            # type-check (strict)
 uv run pytest                    # tool-boundary tests (panel client faked, no network)
 ```
 
