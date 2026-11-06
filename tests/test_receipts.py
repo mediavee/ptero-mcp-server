@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+import httpx
 import pytest
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
 
+from ptero_mcp.config import Settings
+from ptero_mcp.server import build_asgi_app
 from tests.conftest import Rig
 
 pytestmark = pytest.mark.anyio
@@ -124,3 +129,73 @@ async def test_send_command_states_it_is_a_send_receipt_and_names_the_readers(ri
     assert "send receipt" in note.lower()
     for reader in ("tail_console", "wait_console", "run_command"):
         assert reader in note
+
+
+# ── review regressions ─────────────────────────────────────────────────────
+
+
+async def test_plain_text_success_stays_a_success(labelled_rig: Rig) -> None:
+    labelled_rig.client.server = "restarting soon"  # type: ignore[assignment]
+    out = await call(labelled_rig, "get_server", server_id="abc")
+    assert out == {"panel": "dev", "result": "restarting soon"}
+
+
+async def test_upstream_panel_key_cannot_override_the_label(labelled_rig: Rig) -> None:
+    labelled_rig.client.server = {"panel": "spoofed.example", "object": "server"}
+    out = await call(labelled_rig, "get_server", server_id="abc")
+    assert out["panel"] == "dev"
+    assert out["object"] == "server"
+
+
+@pytest.fixture
+async def http_mcp() -> AsyncIterator[Callable[[str], Client[Any]]]:
+    """The real ASGI app, so the panel comes from request headers like in production."""
+    settings = Settings.model_validate({"mcp_auth_token": "tok"})
+    app = build_asgi_app(settings)
+
+    def connect(panel_url: str) -> Client[Any]:
+        def factory(
+            headers: dict[str, str] | None = None,
+            timeout: httpx.Timeout | None = None,
+            auth: httpx.Auth | None = None,
+            follow_redirects: bool = True,
+        ) -> httpx.AsyncClient:
+            return httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                headers=headers,
+                timeout=timeout or httpx.Timeout(30.0),
+                auth=auth,
+                follow_redirects=follow_redirects,
+            )
+
+        return Client(
+            StreamableHttpTransport(
+                "http://test/mcp",
+                headers={
+                    "Authorization": "Bearer tok",
+                    "X-Pterodactyl-Url": panel_url,
+                    "X-Pterodactyl-Key": "k",
+                },
+                httpx_client_factory=factory,
+            )
+        )
+
+    async with app.router.lifespan_context(app):
+        yield connect
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("get_server", {}),  # argument validation
+        ("get_server", {"server_id": 5}),  # argument type
+        ("no_such_tool", {}),  # unknown tool
+    ],
+)
+async def test_every_error_names_the_panel_of_the_request_headers(
+    http_mcp: Callable[[str], Client[Any]], tool: str, args: dict[str, Any]
+) -> None:
+    async with http_mcp("https://prod.example/") as client:
+        result = await client.call_tool(tool, args, raise_on_error=False)
+    assert result.is_error
+    assert str(getattr(result.content[0], "text", "")).startswith("[panel prod.example] ")

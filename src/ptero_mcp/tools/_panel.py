@@ -34,12 +34,12 @@ class PanelLabelMiddleware(Middleware):
         panel = self._panel()
         try:
             result = await call_next(context)
-        except ToolError as exc:
+        except Exception as exc:  # argument validation and unknown tools are not ToolErrors
             raise ToolError(f"[panel {panel}] {exc}") from exc
 
         body = result.structured_content
         payload = (
-            {"panel": panel, **body}
+            {**body, "panel": panel}
             if isinstance(body, dict)
             else {"panel": panel, "result": _plain(result)}
         )
@@ -51,8 +51,13 @@ class PanelLabelMiddleware(Middleware):
 
 
 def _plain(result: ToolResult) -> Any:
-    """The JSON a tool returned when it was not an object: parsed from its text block."""
+    """What a tool returned when it was not an object: its text block, parsed when it is JSON."""
     if not result.content:
         return None
     text = getattr(result.content[0], "text", None)
-    return json.loads(text) if isinstance(text, str) else None
+    if not isinstance(text, str):
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
