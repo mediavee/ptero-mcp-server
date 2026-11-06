@@ -57,6 +57,11 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             command=command,
             sent_at=datetime.now(UTC).isoformat(),
             sent_at_ms=sent_at_ms,
+            note=(
+                "Send receipt only: the panel accepted the command, its effect is unknown. "
+                "Read it with tail_console(since_ms=sent_at_ms), wait_console, "
+                "or run_command with expect."
+            ),
         )
 
     @mcp.tool(
@@ -79,7 +84,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ] = None,
         expect: Annotated[
             str | None,
-            Field(description="Regex; return early when a line matches (matched=true)."),
+            Field(description="Regex; return early on a match. `matched` is set only with this."),
         ] = None,
         ready_timeout_ms: Annotated[
             int | None,
@@ -170,7 +175,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         ] = None,
         expect: Annotated[
             str | None,
-            Field(description="Regex; return early when a line matches (matched=true)."),
+            Field(description="Regex; return early on a match. `matched` is set only with this."),
         ] = None,
         since_ms: Annotated[
             int | None,
@@ -230,6 +235,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
 def _result_to_dict(result: Any) -> dict[str, Any]:
     """Serialize a hub result dataclass, converting nested ConsoleLine entries."""
     data = asdict(result)
-    if "warning" in data and data["warning"] is None:
-        data.pop("warning")
+    for optional in ("warning", "matched"):
+        if optional in data and data[optional] is None:
+            data.pop(optional)
     return data

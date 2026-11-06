@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastmcp import FastMCP
 
 from ptero_mcp.context import ToolContext
+from ptero_mcp.tools._panel import PanelLabelMiddleware
 from ptero_mcp.tools.activity import register as register_activity
 from ptero_mcp.tools.backups import register as register_backups
 from ptero_mcp.tools.console import register as register_console
@@ -15,6 +16,7 @@ from ptero_mcp.tools.servers import register as register_servers
 
 
 def register_all(mcp: FastMCP, ctx: ToolContext) -> None:
+    mcp.add_middleware(PanelLabelMiddleware(ctx.settings))
     register_servers(mcp, ctx)
     register_power(mcp, ctx)
     register_console(mcp, ctx)

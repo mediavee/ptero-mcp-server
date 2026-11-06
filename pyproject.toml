@@ -35,6 +35,7 @@ packages = ["src/ptero_mcp"]
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
+    "pytest>=9.0.0",
     "ruff>=0.15.20",
 ]
 
@@ -68,3 +69,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 # Pterodactyl's API returns untyped JSON; tools assert concrete shapes at the boundary.
 warn_return_any = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
