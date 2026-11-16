@@ -75,7 +75,7 @@ For Claude Desktop or other JSON-config clients:
 
 ## Multi-panel usage
 
-A single instance serves any number of panels and operator keys. The server holds **no panel URL and no API key** — every `/mcp` request must carry `X-Pterodactyl-Url` and `X-Pterodactyl-Key` (plus the shared `Authorization: Bearer`). Console buffers are isolated per `(panel_url, api_key, server_id)` triple, so two operators never see each other's buffer — enforced via `ContextVar`s set by the auth middleware. Requests missing either header are rejected with HTTP 400.
+A single instance serves any number of panels and operator keys. The server holds **no panel URL and no API key** — every `/mcp` request must carry `X-Pterodactyl-Url` and `X-Pterodactyl-Key` (plus the shared `Authorization: Bearer`). `X-Pterodactyl-Url` is an `http` or `https` origin (scheme, host, optional port). A path other than a trailing slash, a query, a fragment, or userinfo is rejected with HTTP 400. Console buffers are isolated per `(panel_url, api_key, server_id)` triple, so two operators never see each other's buffer — enforced via `ContextVar`s set by the auth middleware. Requests missing either header are rejected with HTTP 400.
 
 ## Tools
 
@@ -134,7 +134,7 @@ Every tool result is a JSON object carrying `panel` (see `PANEL_LABEL`). A tool 
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `MCP_AUTH_TOKEN` | yes | — | Bearer token required on every request. Generate with `openssl rand -hex 32` |
+| `MCP_AUTH_TOKEN` | yes | — | Bearer token required on every request. Empty or whitespace is refused at startup. Generate with `openssl rand -hex 32` |
 | `HTTP_HOST` | no | `0.0.0.0` | Bind host |
 | `HTTP_PORT` | no | `3000` | Bind port |
 | `CONSOLE_BUFFER_SIZE` | no | `5000` | Rolling buffer size per session. Bump on chatty servers |
@@ -147,7 +147,7 @@ Panel URL and Client API key are supplied per request via the `X-Pterodactyl-Url
 
 ## Logging
 
-`structlog`; human-readable by default, JSON via `LOG_JSON=true`. Panel URLs and API keys are never logged.
+`structlog`; human-readable by default, JSON via `LOG_JSON=true`. Panel URLs, API keys, and upstream response bodies are never logged. A disconnect log carries the panel host only.
 
 ## Development
 

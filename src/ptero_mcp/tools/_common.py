@@ -32,7 +32,6 @@ def map_panel_errors[**P, R](
                 "panel_tool_error",
                 tool=fn.__name__,
                 status=exc.status,
-                body=exc.body,
             )
             if exc.status == 502:
                 raise ToolError(
@@ -71,6 +70,16 @@ DESTRUCTIVE: dict[str, Any] = {
     "readOnlyHint": False,
     "destructiveHint": True,
     "idempotentHint": True,
+    "openWorldHint": True,
+}
+
+# A second call is a second effect (restart, restore, a new schedule task).
+# MCP annotations are static, so a tool that can run a command or a power
+# signal carries this hint for every call, including backup tasks.
+DESTRUCTIVE_ONCE: dict[str, Any] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": False,
     "openWorldHint": True,
 }
 

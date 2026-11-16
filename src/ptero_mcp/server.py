@@ -28,6 +28,7 @@ from ptero_mcp.console_hub import ConsoleHub
 from ptero_mcp.context import ToolContext
 from ptero_mcp.logging import configure_logging, get_logger
 from ptero_mcp.tools import register_all
+from ptero_mcp.urls import normalise_panel_origin
 
 log = get_logger(__name__)
 
@@ -114,11 +115,13 @@ class _AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         async def with_credentials(req: Request) -> Response:
-            panel_url = req.headers.get("x-pterodactyl-url", "").strip()
+            raw_panel_url = req.headers.get("x-pterodactyl-url", "").strip()
             api_key = req.headers.get("x-pterodactyl-key", "").strip()
-            if not panel_url or not api_key:
+            if not raw_panel_url or not api_key:
                 return _missing_creds_response()
-            if not (panel_url.startswith("http://") or panel_url.startswith("https://")):
+            try:
+                panel_url = normalise_panel_origin(raw_panel_url)
+            except ValueError:
                 return _bad_panel_url_response()
             url_token = current_panel_url.set(panel_url)
             key_token = current_api_key.set(api_key)
@@ -155,7 +158,10 @@ def _bad_panel_url_response() -> JSONResponse:
             "jsonrpc": "2.0",
             "error": {
                 "code": -32602,
-                "message": "X-Pterodactyl-Url must start with http:// or https://",
+                "message": (
+                    "X-Pterodactyl-Url must be an http(s) origin: scheme and host, "
+                    "with an optional port. A path, query, fragment, or userinfo is not allowed."
+                ),
             },
             "id": None,
         },

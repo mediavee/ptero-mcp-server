@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
+from ptero_mcp.ids import DatabaseId, ServerId
 from ptero_mcp.tools._common import (
     DESTRUCTIVE,
     READ_ONLY,
@@ -25,7 +26,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def list_databases(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
     ) -> Any:
         return await ctx.client.list_databases(server_id)
 
@@ -36,7 +37,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def create_database(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         database: Annotated[
             str,
             Field(
@@ -64,10 +65,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def rotate_database_password(
-        server_id: Annotated[str, Field(description="Server identifier")],
-        database_id: Annotated[
-            str, Field(description="Database identifier (hashid from list_databases)")
-        ],
+        server_id: ServerId,
+        database_id: DatabaseId,
     ) -> Any:
         return await ctx.client.rotate_database_password(server_id, database_id)
 
@@ -78,8 +77,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def delete_database(
-        server_id: Annotated[str, Field(description="Server identifier")],
-        database_id: Annotated[str, Field(description="Database identifier (hashid)")],
+        server_id: ServerId,
+        database_id: DatabaseId,
     ) -> dict[str, Any]:
         await ctx.client.delete_database(server_id, database_id)
         return ok(server_id=server_id, database_id=database_id, deleted=True)

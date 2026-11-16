@@ -9,8 +9,10 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
+from ptero_mcp.ids import BackupUuid, ServerId
 from ptero_mcp.tools._common import (
     DESTRUCTIVE,
+    DESTRUCTIVE_ONCE,
     READ_ONLY,
     WRITE,
     map_panel_errors,
@@ -26,7 +28,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def list_backups(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         page: Annotated[int | None, Field(ge=1)] = None,
         per_page: Annotated[int | None, Field(ge=1, le=50)] = None,
     ) -> Any:
@@ -39,8 +41,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def get_backup(
-        server_id: Annotated[str, Field(description="Server identifier")],
-        backup_uuid: Annotated[str, Field(description="Backup UUID")],
+        server_id: ServerId,
+        backup_uuid: BackupUuid,
     ) -> Any:
         return await ctx.client.get_backup(server_id, backup_uuid)
 
@@ -51,7 +53,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def create_backup(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         name: Annotated[
             str | None, Field(max_length=191, description="Optional human-readable name")
         ] = None,
@@ -80,8 +82,8 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def delete_backup(
-        server_id: Annotated[str, Field(description="Server identifier")],
-        backup_uuid: Annotated[str, Field(description="Backup UUID")],
+        server_id: ServerId,
+        backup_uuid: BackupUuid,
     ) -> dict[str, Any]:
         await ctx.client.delete_backup(server_id, backup_uuid)
         return ok(server_id=server_id, backup_uuid=backup_uuid, deleted=True)
@@ -93,20 +95,20 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def toggle_backup_lock(
-        server_id: Annotated[str, Field(description="Server identifier")],
-        backup_uuid: Annotated[str, Field(description="Backup UUID")],
+        server_id: ServerId,
+        backup_uuid: BackupUuid,
     ) -> Any:
         return await ctx.client.toggle_backup_lock(server_id, backup_uuid)
 
     @mcp.tool(
         name="restore_backup",
         description="Restore backup over server files. DESTRUCTIVE if truncate=true (wipes first).",
-        annotations=DESTRUCTIVE,
+        annotations=DESTRUCTIVE_ONCE,
     )
     @map_panel_errors
     async def restore_backup(
-        server_id: Annotated[str, Field(description="Server identifier")],
-        backup_uuid: Annotated[str, Field(description="Backup UUID")],
+        server_id: ServerId,
+        backup_uuid: BackupUuid,
         truncate: Annotated[
             bool | None,
             Field(description="Wipe existing server files before restoring. Default: false."),
@@ -127,7 +129,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def get_backup_download_url(
-        server_id: Annotated[str, Field(description="Server identifier")],
-        backup_uuid: Annotated[str, Field(description="Backup UUID")],
+        server_id: ServerId,
+        backup_uuid: BackupUuid,
     ) -> Any:
         return await ctx.client.get_backup_download_url(server_id, backup_uuid)
