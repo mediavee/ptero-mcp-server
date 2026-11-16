@@ -30,6 +30,7 @@ from ptero_mcp.client import (
 )
 from ptero_mcp.config import Settings
 from ptero_mcp.logging import get_logger
+from ptero_mcp.urls import normalise_panel_origin, panel_host, redact_url, wings_socket_url
 
 log = get_logger(__name__)
 
@@ -47,6 +48,9 @@ class ConsoleLine:
 
     line: str
     """Raw line text (may contain ANSI escapes)."""
+
+    replay: bool = False
+    """True for a line from the Wings log dump, which must not satisfy since_ms or expect."""
 
 
 LineListener = Callable[[ConsoleLine], None]
@@ -161,6 +165,13 @@ class ConsoleHub:
 
     REAPER_INTERVAL_S: int = 30
     TOKEN_REFRESH_INTERVAL_S: int = 8 * 60
+    # Wings sends `status` before it reads `send logs`, then writes the logfile
+    # as ordinary console output with no trailer. Polling also emits `stats`,
+    # so the dump is the burst that follows `send logs` until the socket is idle.
+    AUTH_BURST_S: float = 0.05
+    REPLAY_FIRST_S: float = 1.0
+    REPLAY_IDLE_S: float = 0.05
+    REPLAY_MAX_LINES: int = 500
 
     def __init__(self, settings: Settings, client: PterodactylClient) -> None:
         self._settings = settings
@@ -192,7 +203,7 @@ class ConsoleHub:
                 "No Pterodactyl panel URL / API key in request context — "
                 "the HTTP middleware should have rejected this request earlier."
             )
-        return panel_url, api_key
+        return normalise_panel_origin(panel_url), api_key
 
     # ─────────────────────────────── lifecycle ───────────────────────────────
 
@@ -264,7 +275,9 @@ class ConsoleHub:
 
         historical: list[ConsoleLine] = []
         if options.since_ms is not None:
-            historical = [ln for ln in session.buffer if ln.ts >= options.since_ms]
+            historical = [
+                ln for ln in session.buffer if not ln.replay and ln.ts >= options.since_ms
+            ]
             if expect_re is not None:
                 for ln in historical:
                     if expect_re.search(ln.line):
@@ -367,8 +380,8 @@ class ConsoleHub:
                     log.warning(
                         "console_session_disconnect",
                         server_id=session.server_id,
-                        panel_url=session.panel_url,
-                        error=str(exc),
+                        panel_host=panel_host(session.panel_url),
+                        error=redact_url(str(exc)),
                         error_type=type(exc).__name__,
                     )
 
@@ -384,11 +397,13 @@ class ConsoleHub:
 
     async def _connect_and_pump(self, session: _Session) -> None:
         creds = await self._client.get_websocket_credentials(session.server_id)
+        socket_url = wings_socket_url(creds.socket)
+        # Wings checks the Origin header against the panel URL, which is an origin.
+        origin = Origin(normalise_panel_origin(session.panel_url))
 
-        # Wings checks the Origin header against the panel URL.
         async with websockets.connect(
-            creds.socket,
-            origin=Origin(session.panel_url),
+            socket_url,
+            origin=origin,
             ping_interval=20,
             ping_timeout=20,
             max_size=2**20,
@@ -404,17 +419,72 @@ class ConsoleHub:
                     self._refresh_loop(session), name=f"console-refresh-{session.server_id}"
                 )
 
-                async for raw in ws:
-                    if isinstance(raw, bytes):
-                        raw = raw.decode("utf-8", errors="replace")
-                    self._handle_message(session, raw)
+                await self._pump(session, ws)
             finally:
+                # Clear before any await: cancellation can interrupt the finally.
+                session.ready.clear()
+                session.ws = None
                 if session.refresh_task is not None:
                     session.refresh_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await session.refresh_task
                     session.refresh_task = None
-                session.ws = None
+
+    async def _pump(self, session: _Session, ws: ClientConnection) -> None:
+        while not session.closed:
+            raw = await self._recv_text(ws)
+            if _event_name(raw) == "auth success":
+                await self._open_live(session, ws)
+                continue
+            self._handle_message(session, raw)
+
+    async def _open_live(self, session: _Session, ws: ClientConnection) -> None:
+        """Pull the log dump, then mark the socket ready on the first auth.
+
+        Lines from that dump are replay. ``ready`` stays clear until the dump
+        ends, so a waiter cannot treat the previous boot as the current one.
+        A later auth (token refresh) must not clear ``ready``.
+        """
+        already_ready = session.ready.is_set()
+        await self._read_burst(session, ws, self.AUTH_BURST_S, replay=False)
+        # Wings ignores `send logs` unless the environment is running.
+        if session.server_state == "running":
+            await ws.send(json.dumps({"event": "send logs", "args": [None]}))
+            await self._drain_replay(session, ws)
+        if not already_ready:
+            session.ready.set()
+
+    async def _drain_replay(self, session: _Session, ws: ClientConnection) -> None:
+        timeout = self.REPLAY_FIRST_S
+        seen = 0
+        while seen < self.REPLAY_MAX_LINES and not session.closed:
+            try:
+                raw = await asyncio.wait_for(self._recv_text(ws), timeout)
+            except TimeoutError:
+                return
+            self._handle_message(session, raw, replay=True)
+            seen += 1
+            timeout = self.REPLAY_IDLE_S
+
+    async def _read_burst(
+        self, session: _Session, ws: ClientConnection, window_s: float, *, replay: bool
+    ) -> None:
+        deadline = time.monotonic() + window_s
+        while not session.closed:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            try:
+                raw = await asyncio.wait_for(self._recv_text(ws), remaining)
+            except TimeoutError:
+                return
+            self._handle_message(session, raw, replay=replay)
+
+    async def _recv_text(self, ws: ClientConnection) -> str:
+        raw = await ws.recv()
+        if isinstance(raw, bytes):
+            return raw.decode("utf-8", errors="replace")
+        return raw
 
     async def _refresh_loop(self, session: _Session) -> None:
         try:
@@ -429,12 +499,12 @@ class ConsoleHub:
                     log.error(
                         "token_refresh_failed",
                         server_id=session.server_id,
-                        error=str(exc),
+                        error=redact_url(str(exc)),
                     )
         except asyncio.CancelledError:
             raise
 
-    def _handle_message(self, session: _Session, raw: str) -> None:
+    def _handle_message(self, session: _Session, raw: str, *, replay: bool = False) -> None:
         try:
             msg = json.loads(raw)
         except json.JSONDecodeError:
@@ -444,23 +514,16 @@ class ConsoleHub:
             return
         args: list[Any] = msg.get("args") or []
 
-        if event == "auth success":
-            # Replay recent console history into the buffer.
-            ws = session.ws
-            if ws is not None:
-                self._spawn(session, ws.send(json.dumps({"event": "send logs", "args": []})))
-            session.ready.set()
-
-        elif event in ("console output", "install output"):
+        if event in ("console output", "install output"):
             now = _now_ms()
             for chunk in args:
                 # Wings sometimes batches multiple lines in one arg separated by \n.
                 for split in re.split(r"\r?\n", str(chunk)):
                     if not split:
                         continue
-                    entry = ConsoleLine(ts=now, line=split)
+                    entry = ConsoleLine(ts=now, line=split, replay=replay)
                     session.buffer.append(entry)
-                    if session.line_listeners:
+                    if not replay and session.line_listeners:
                         self._fanout(session, entry)
 
         elif event == "status":
@@ -484,7 +547,9 @@ class ConsoleHub:
             creds = await self._client.get_websocket_credentials(session.server_id)
             await session.ws.send(json.dumps({"event": "auth", "args": [creds.token]}))
         except Exception as exc:
-            log.error("token_refresh_failed", server_id=session.server_id, error=str(exc))
+            log.error(
+                "token_refresh_failed", server_id=session.server_id, error=redact_url(str(exc))
+            )
 
     def _fanout(self, session: _Session, entry: ConsoleLine) -> None:
         # Iterate over a snapshot so a listener that unsubscribes during fan-out
@@ -547,7 +612,7 @@ class ConsoleHub:
     ) -> TailResult:
         lines: list[ConsoleLine] = list(session.buffer)
         if options.since_ms is not None:
-            lines = [ln for ln in lines if ln.ts >= options.since_ms]
+            lines = [ln for ln in lines if not ln.replay and ln.ts >= options.since_ms]
 
         if options.limit is not None and len(lines) > options.limit:
             lines = lines[-options.limit :]
@@ -616,3 +681,13 @@ class _Capture:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _event_name(raw: str) -> str | None:
+    try:
+        event = json.loads(raw).get("event")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event, str) or not event:
+        return None
+    return event

@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
+from ptero_mcp.ids import SERVER_ID_PATTERN, ServerId
 from ptero_mcp.tools._common import READ_ONLY, map_panel_errors
 
 
@@ -40,8 +41,9 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         server_id: Annotated[
             str,
             Field(
+                pattern=SERVER_ID_PATTERN,
                 description=(
-                    "Server identifier (short UUID, visible in panel URLs and list_servers output)"
+                    "Server identifier (8 alphanumeric characters, from list_servers or the panel URL)"
                 ),
             ),
         ],
@@ -57,6 +59,6 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def get_resources(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
     ) -> Any:
         return await ctx.client.get_resources(server_id)

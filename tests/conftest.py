@@ -54,7 +54,7 @@ class Rig:
         panel = cast(PterodactylClient, self.client)
         self.hub = _FixedSessionHub(settings, panel)
         self.session = _Session(
-            server_id="abc", panel_url=PANEL_URL, api_key="k", buffer=deque(maxlen=100)
+            server_id="abcdefgh", panel_url=PANEL_URL, api_key="k", buffer=deque(maxlen=100)
         )
         self.session.ready.set()
         self.hub.session = self.session

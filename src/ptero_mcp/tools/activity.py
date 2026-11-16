@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
+from ptero_mcp.ids import ServerId
 from ptero_mcp.tools._common import READ_ONLY, map_panel_errors
 
 
@@ -22,7 +23,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def get_activity_log(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         page: Annotated[int | None, Field(ge=1)] = None,
         per_page: Annotated[int | None, Field(ge=1, le=100)] = None,
         event_filter: Annotated[

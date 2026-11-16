@@ -16,7 +16,14 @@ from typing import Any, Literal
 import httpx
 
 from ptero_mcp.config import Settings
+from ptero_mcp.ids import (
+    require_backup_uuid,
+    require_database_id,
+    require_numeric_id,
+    require_server_id,
+)
 from ptero_mcp.logging import get_logger
+from ptero_mcp.urls import normalise_panel_origin, redact_url
 
 log = get_logger(__name__)
 
@@ -54,9 +61,19 @@ def use_credentials(panel_url: str, api_key: str) -> Iterator[None]:
         current_panel_url.reset(url_token)
 
 
-def _normalise_panel_url(value: str) -> str:
-    """Strip trailing slash. The middleware already validated the scheme."""
-    return value.rstrip("/")
+def _server_path(server_id: str, *segments: str) -> str:
+    require_server_id(server_id)
+    return "/servers/" + "/".join((server_id, *segments))
+
+
+def _backup_path(server_id: str, backup_uuid: str, *segments: str) -> str:
+    require_backup_uuid(backup_uuid)
+    return _server_path(server_id, "backups", backup_uuid, *segments)
+
+
+def _database_path(server_id: str, database_id: str, *segments: str) -> str:
+    require_database_id(database_id)
+    return _server_path(server_id, "databases", database_id, *segments)
 
 
 class PterodactylError(Exception):
@@ -90,7 +107,9 @@ class PterodactylClient:
         self._http = httpx.AsyncClient(
             headers={"Accept": "application/json"},
             timeout=httpx.Timeout(30.0, connect=10.0),
-            transport=httpx.AsyncHTTPTransport(retries=2),
+            # Connect retries live in the GET loop below. Leaving them on the
+            # transport would send a POST again after this method had stopped.
+            transport=httpx.AsyncHTTPTransport(retries=0),
         )
 
     async def aclose(self) -> None:
@@ -117,28 +136,32 @@ class PterodactylClient:
                 "the HTTP middleware should have rejected this request earlier."
             )
 
-        url = _normalise_panel_url(panel_url) + "/api/client" + (path or "")
+        # GET may be repeated. A write is sent once: a timeout can mean the panel
+        # already applied it, and a second POST would apply it again.
+        attempts = retries if method.upper() == "GET" else 1
+        url = normalise_panel_origin(panel_url) + "/api/client" + (path or "")
         request_headers = {"Authorization": f"Bearer {api_key}"}
 
         last_exc: Exception | None = None
         backoff = 0.4
-        for attempt in range(retries):
+        for attempt in range(attempts):
             try:
                 resp = await self._http.request(
                     method, url, params=params, json=body, headers=request_headers
                 )
             except httpx.RequestError as exc:
                 last_exc = exc
-                if attempt == retries - 1:
+                detail = redact_url(str(exc))
+                if attempt == attempts - 1:
                     log.error(
                         "panel_request_network_error",
                         method=method,
                         path=path,
                         attempt=attempt + 1,
-                        error=str(exc),
+                        error=detail,
                     )
                     raise PterodactylError(
-                        f"Pterodactyl API {method} {path} network error: {exc}", 0, None
+                        f"Pterodactyl API {method} {path} network error: {detail}", 0, None
                     ) from exc
                 log.warning(
                     "panel_request_network_retry",
@@ -146,13 +169,13 @@ class PterodactylClient:
                     path=path,
                     attempt=attempt + 1,
                     backoff_s=backoff,
-                    error=str(exc),
+                    error=detail,
                 )
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 continue
 
-            if resp.status_code >= 500 and attempt < retries - 1:
+            if resp.status_code >= 500 and attempt < attempts - 1:
                 log.warning(
                     "panel_request_server_error_retry",
                     method=method,
@@ -185,7 +208,6 @@ class PterodactylClient:
                     method=method,
                     path=path,
                     status=resp.status_code,
-                    body=parsed,
                 )
                 raise PterodactylError(
                     f"Pterodactyl API {method} {path} failed: "
@@ -208,23 +230,23 @@ class PterodactylClient:
         return await self._request("GET", "", query={"page": page, "per_page": per_page})
 
     async def get_server(self, server_id: str) -> Any:
-        return await self._request("GET", f"/servers/{server_id}")
+        return await self._request("GET", _server_path(server_id))
 
     async def get_resources(self, server_id: str) -> Any:
-        return await self._request("GET", f"/servers/{server_id}/resources")
+        return await self._request("GET", _server_path(server_id, "resources"))
 
     # ───────────────────────────────── power ───────────────────────────────
 
     async def send_power(self, server_id: str, signal: PowerSignal) -> None:
-        await self._request("POST", f"/servers/{server_id}/power", body={"signal": signal})
+        await self._request("POST", _server_path(server_id, "power"), body={"signal": signal})
 
     # ──────────────────────────────── console ──────────────────────────────
 
     async def send_command(self, server_id: str, command: str) -> None:
-        await self._request("POST", f"/servers/{server_id}/command", body={"command": command})
+        await self._request("POST", _server_path(server_id, "command"), body={"command": command})
 
     async def get_websocket_credentials(self, server_id: str) -> WebsocketCredentials:
-        data = await self._request("GET", f"/servers/{server_id}/websocket")
+        data = await self._request("GET", _server_path(server_id, "websocket"))
         payload = data["data"]
         return WebsocketCredentials(token=payload["token"], socket=payload["socket"])
 
@@ -241,7 +263,7 @@ class PterodactylClient:
     ) -> Any:
         return await self._request(
             "GET",
-            f"/servers/{server_id}/activity",
+            _server_path(server_id, "activity"),
             query={
                 "page": page,
                 "per_page": per_page,
@@ -261,12 +283,12 @@ class PterodactylClient:
     ) -> Any:
         return await self._request(
             "GET",
-            f"/servers/{server_id}/backups",
+            _server_path(server_id, "backups"),
             query={"page": page, "per_page": per_page},
         )
 
     async def get_backup(self, server_id: str, backup_uuid: str) -> Any:
-        return await self._request("GET", f"/servers/{server_id}/backups/{backup_uuid}")
+        return await self._request("GET", _backup_path(server_id, backup_uuid))
 
     async def create_backup(
         self,
@@ -278,57 +300,59 @@ class PterodactylClient:
     ) -> Any:
         return await self._request(
             "POST",
-            f"/servers/{server_id}/backups",
+            _server_path(server_id, "backups"),
             body={"name": name, "ignored": ignored, "is_locked": is_locked},
         )
 
     async def delete_backup(self, server_id: str, backup_uuid: str) -> None:
-        await self._request("DELETE", f"/servers/{server_id}/backups/{backup_uuid}")
+        await self._request("DELETE", _backup_path(server_id, backup_uuid))
 
     async def toggle_backup_lock(self, server_id: str, backup_uuid: str) -> Any:
-        return await self._request("POST", f"/servers/{server_id}/backups/{backup_uuid}/lock")
+        return await self._request("POST", _backup_path(server_id, backup_uuid, "lock"))
 
     async def restore_backup(
         self, server_id: str, backup_uuid: str, truncate: bool = False
     ) -> None:
         await self._request(
             "POST",
-            f"/servers/{server_id}/backups/{backup_uuid}/restore",
+            _backup_path(server_id, backup_uuid, "restore"),
             body={"truncate": truncate},
         )
 
     async def get_backup_download_url(self, server_id: str, backup_uuid: str) -> Any:
-        return await self._request("GET", f"/servers/{server_id}/backups/{backup_uuid}/download")
+        return await self._request("GET", _backup_path(server_id, backup_uuid, "download"))
 
     # ─────────────────────────────── databases ─────────────────────────────
 
     async def list_databases(self, server_id: str) -> Any:
         return await self._request(
-            "GET", f"/servers/{server_id}/databases", query={"include": "password"}
+            "GET", _server_path(server_id, "databases"), query={"include": "password"}
         )
 
     async def create_database(self, server_id: str, database: str, remote: str) -> Any:
         return await self._request(
             "POST",
-            f"/servers/{server_id}/databases",
+            _server_path(server_id, "databases"),
             body={"database": database, "remote": remote},
         )
 
     async def rotate_database_password(self, server_id: str, database_id: str) -> Any:
         return await self._request(
-            "POST", f"/servers/{server_id}/databases/{database_id}/rotate-password"
+            "POST", _database_path(server_id, database_id, "rotate-password")
         )
 
     async def delete_database(self, server_id: str, database_id: str) -> None:
-        await self._request("DELETE", f"/servers/{server_id}/databases/{database_id}")
+        await self._request("DELETE", _database_path(server_id, database_id))
 
     # ─────────────────────────────── schedules ─────────────────────────────
 
     async def list_schedules(self, server_id: str) -> Any:
-        return await self._request("GET", f"/servers/{server_id}/schedules")
+        return await self._request("GET", _server_path(server_id, "schedules"))
 
     async def get_schedule(self, server_id: str, schedule_id: int) -> Any:
-        return await self._request("GET", f"/servers/{server_id}/schedules/{schedule_id}")
+        return await self._request(
+            "GET", _server_path(server_id, "schedules", require_numeric_id(schedule_id))
+        )
 
     async def create_schedule(
         self,
@@ -345,7 +369,7 @@ class PterodactylClient:
     ) -> Any:
         return await self._request(
             "POST",
-            f"/servers/{server_id}/schedules",
+            _server_path(server_id, "schedules"),
             body={
                 "name": name,
                 "is_active": is_active,
@@ -374,7 +398,7 @@ class PterodactylClient:
     ) -> Any:
         return await self._request(
             "POST",
-            f"/servers/{server_id}/schedules/{schedule_id}",
+            _server_path(server_id, "schedules", require_numeric_id(schedule_id)),
             body={
                 "name": name,
                 "is_active": is_active,
@@ -388,10 +412,15 @@ class PterodactylClient:
         )
 
     async def delete_schedule(self, server_id: str, schedule_id: int) -> None:
-        await self._request("DELETE", f"/servers/{server_id}/schedules/{schedule_id}")
+        await self._request(
+            "DELETE", _server_path(server_id, "schedules", require_numeric_id(schedule_id))
+        )
 
     async def execute_schedule(self, server_id: str, schedule_id: int) -> None:
-        await self._request("POST", f"/servers/{server_id}/schedules/{schedule_id}/execute")
+        await self._request(
+            "POST",
+            _server_path(server_id, "schedules", require_numeric_id(schedule_id), "execute"),
+        )
 
     async def create_schedule_task(
         self,
@@ -406,7 +435,7 @@ class PterodactylClient:
     ) -> Any:
         return await self._request(
             "POST",
-            f"/servers/{server_id}/schedules/{schedule_id}/tasks",
+            _server_path(server_id, "schedules", require_numeric_id(schedule_id), "tasks"),
             body={
                 "action": action,
                 "payload": payload or "",
@@ -430,7 +459,13 @@ class PterodactylClient:
     ) -> Any:
         return await self._request(
             "POST",
-            f"/servers/{server_id}/schedules/{schedule_id}/tasks/{task_id}",
+            _server_path(
+                server_id,
+                "schedules",
+                require_numeric_id(schedule_id),
+                "tasks",
+                require_numeric_id(task_id),
+            ),
             body={
                 "action": action,
                 "payload": payload or "",
@@ -442,5 +477,12 @@ class PterodactylClient:
 
     async def delete_schedule_task(self, server_id: str, schedule_id: int, task_id: int) -> None:
         await self._request(
-            "DELETE", f"/servers/{server_id}/schedules/{schedule_id}/tasks/{task_id}"
+            "DELETE",
+            _server_path(
+                server_id,
+                "schedules",
+                require_numeric_id(schedule_id),
+                "tasks",
+                require_numeric_id(task_id),
+            ),
         )

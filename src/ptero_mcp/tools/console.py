@@ -18,6 +18,7 @@ from ptero_mcp.console_hub import (
     WaitOptions,
 )
 from ptero_mcp.context import ToolContext
+from ptero_mcp.ids import ServerId
 from ptero_mcp.tools._common import (
     IDEMPOTENT,
     READ_ONLY,
@@ -37,7 +38,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         annotations=WRITE,
     )
     async def send_command(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         command: Annotated[
             str,
             Field(min_length=1, description="The command to inject into the server console"),
@@ -73,7 +74,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         annotations=WRITE,
     )
     async def run_command(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         command: Annotated[
             str,
             Field(min_length=1, description="The command to inject into the server console"),
@@ -119,7 +120,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         annotations=READ_ONLY,
     )
     async def tail_console(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         limit: Annotated[
             int,
             Field(
@@ -164,7 +165,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         annotations=READ_ONLY,
     )
     async def wait_console(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         wait_ms: Annotated[
             int | None,
             Field(
@@ -209,7 +210,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def watch_server(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
     ) -> dict[str, Any]:
         return await ctx.console_hub.watch(server_id)
 
@@ -219,7 +220,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
         annotations=IDEMPOTENT,
     )
     async def unwatch_server(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
     ) -> dict[str, Any]:
         return ctx.console_hub.unwatch(server_id)
 
@@ -238,4 +239,7 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
     for optional in ("warning", "matched"):
         if optional in data and data[optional] is None:
             data.pop(optional)
+    for line in data.get("lines") or []:
+        if isinstance(line, dict):
+            line.pop("replay", None)
     return data

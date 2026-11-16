@@ -9,8 +9,10 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from ptero_mcp.context import ToolContext
+from ptero_mcp.ids import ServerId
 from ptero_mcp.tools._common import (
     DESTRUCTIVE,
+    DESTRUCTIVE_ONCE,
     IDEMPOTENT,
     READ_ONLY,
     WRITE,
@@ -31,7 +33,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def list_schedules(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
     ) -> Any:
         return await ctx.client.list_schedules(server_id)
 
@@ -42,7 +44,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def get_schedule(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         schedule_id: ScheduleId,
     ) -> Any:
         return await ctx.client.get_schedule(server_id, schedule_id)
@@ -54,7 +56,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def create_schedule(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         name: Annotated[str, Field(min_length=1, max_length=191)],
         minute: CronField,
         hour: CronField,
@@ -86,7 +88,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def update_schedule(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         schedule_id: ScheduleId,
         name: Annotated[str, Field(min_length=1, max_length=191)],
         is_active: bool,
@@ -117,7 +119,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def delete_schedule(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         schedule_id: ScheduleId,
     ) -> dict[str, Any]:
         await ctx.client.delete_schedule(server_id, schedule_id)
@@ -126,11 +128,11 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     @mcp.tool(
         name="execute_schedule",
         description="Execute a schedule immediately, ignoring cron and active flag.",
-        annotations=WRITE,
+        annotations=DESTRUCTIVE_ONCE,
     )
     @map_panel_errors
     async def execute_schedule(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         schedule_id: ScheduleId,
     ) -> dict[str, Any]:
         await ctx.client.execute_schedule(server_id, schedule_id)
@@ -146,11 +148,11 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
             "Add a task to a schedule. Types: command (console), power "
             "(start/stop/restart/kill), backup. Sequential execution with time_offset delay."
         ),
-        annotations=WRITE,
+        annotations=DESTRUCTIVE_ONCE,
     )
     @map_panel_errors
     async def create_schedule_task(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         schedule_id: ScheduleId,
         action: Literal["command", "power", "backup"],
         time_offset: Annotated[
@@ -188,7 +190,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def update_schedule_task(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         schedule_id: ScheduleId,
         task_id: TaskId,
         action: Literal["command", "power", "backup"],
@@ -215,7 +217,7 @@ def register(mcp: FastMCP, ctx: ToolContext) -> None:
     )
     @map_panel_errors
     async def delete_schedule_task(
-        server_id: Annotated[str, Field(description="Server identifier")],
+        server_id: ServerId,
         schedule_id: ScheduleId,
         task_id: TaskId,
     ) -> dict[str, Any]:

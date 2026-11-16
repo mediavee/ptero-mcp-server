@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     )
 
     mcp_auth_token: SecretStr = Field(..., description="Bearer token for HTTP clients.")
+
+    @field_validator("mcp_auth_token", mode="after")
+    @classmethod
+    def _reject_blank_token(cls, value: SecretStr) -> SecretStr:
+        if value.get_secret_value().strip() == "":
+            raise ValueError("MCP_AUTH_TOKEN must not be empty")
+        return value
 
     http_host: str = Field("0.0.0.0", description="HTTP bind host.")
     http_port: int = Field(3000, ge=1, le=65535, description="HTTP bind port.")
